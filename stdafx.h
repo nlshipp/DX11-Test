@@ -11,6 +11,8 @@
 // Windows Header Files:
 #include <windows.h>
 #include <d3d11.h>
+#include <DirectXMath.h>
+#include <d3dcompiler.h>
 
 // C RunTime Header Files
 #include <stdlib.h>

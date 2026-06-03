@@ -4,19 +4,32 @@
 #include "stdafx.h"
 #include "DX11-Test.h"
 
+using namespace DirectX;
+
 #define MAX_LOADSTRING 100
+
+// global structures
+
+struct SimpleVertex
+{
+    XMFLOAT3 f;
+};
 
 // Global Variables:
 HINSTANCE hInst;                                // current instance
-HWND      g_hWnd = NULL;
+HWND      g_hWnd = nullptr;
 
 D3D_DRIVER_TYPE     g_driverType = D3D_DRIVER_TYPE_HARDWARE;
 D3D_FEATURE_LEVEL   g_d3dFeatureLevel;
 
-ID3D11Device *      g_pd3dDevice = NULL;
-ID3D11DeviceContext *    g_pd3dDeviceContext = NULL;
-IDXGISwapChain *         g_pSwapChain = NULL;
-ID3D11RenderTargetView * g_pRenderTargetView = NULL;
+ID3D11Device *      g_pd3dDevice = nullptr;
+ID3D11DeviceContext *   g_pd3dDeviceContext = nullptr;
+IDXGISwapChain *        g_pSwapChain = nullptr;
+ID3D11RenderTargetView* g_pRenderTargetView = nullptr;
+ID3D11InputLayout *     g_pVertexLayout = nullptr;
+ID3D11Buffer *          g_pVertexBuffer = nullptr;
+ID3D11VertexShader*     g_pVertexShader = nullptr;
+ID3D11PixelShader*      g_pPixelShader = nullptr;
 
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
@@ -152,7 +165,7 @@ BOOL InitDevice()
         D3D_FEATURE_LEVEL_10_1,
         D3D_FEATURE_LEVEL_10_0
     };
-    const UINT                numFeatureLevels = sizeof(featureLevels) / sizeof(featureLevels[0]);
+    const UINT                numFeatureLevels = ARRAYSIZE(featureLevels);
 
     DXGI_SWAP_CHAIN_DESC sd;
     ZeroMemory(&sd, sizeof(sd));
@@ -168,7 +181,7 @@ BOOL InitDevice()
     sd.SampleDesc.Quality = 0;
     sd.Windowed = TRUE;
 
-    if (FAILED(D3D11CreateDeviceAndSwapChain(NULL, g_driverType, NULL, 0, featureLevels, numFeatureLevels,
+    if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, g_driverType, nullptr, 0, featureLevels, numFeatureLevels,
         D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &g_d3dFeatureLevel, &g_pd3dDeviceContext)))
     {
         return FALSE;
@@ -176,20 +189,20 @@ BOOL InitDevice()
 
     //  Create a target render view
 
-    ID3D11Texture2D * pBackBuffer = NULL;
+    ID3D11Texture2D * pBackBuffer = nullptr;
     if (FAILED(g_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID *)&pBackBuffer)))
     {
         return FALSE;
     }
 
     HRESULT hr;
-    hr = g_pd3dDevice->CreateRenderTargetView(pBackBuffer, NULL, &g_pRenderTargetView);
+    hr = g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_pRenderTargetView);
     pBackBuffer->Release();
     if (FAILED(hr))
     {
         return FALSE;
     }
-    g_pd3dDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, NULL);
+    g_pd3dDeviceContext->OMSetRenderTargets(1, &g_pRenderTargetView, nullptr);
 
     // initialize viewport
 
@@ -202,11 +215,157 @@ BOOL InitDevice()
     vp.TopLeftY = 0;
     g_pd3dDeviceContext->RSSetViewports(1, &vp);
 
+    // Compile a vertex shader
+
+    // NOTE: in DX11 there don't appear to be any "default" shaders (flat, gourad, phong, etc), all have to be compiled
+
+    ID3DBlob *pVertexShaderBlob = nullptr;
+    hr = S_OK;
+
+    DWORD dwShaderFlags = D3DCOMPILE_ENABLE_STRICTNESS;
+    ID3DBlob * pErrorBlob = nullptr;
+    hr = D3DCompileFromFile(L"shader.foo", nullptr, nullptr, "VS" /* entryPoint */, "vs_4_0" /* szShaderModel */,
+        dwShaderFlags, 0, &pVertexShaderBlob, &pErrorBlob);
+    if (FAILED(hr))
+    {
+        if (pErrorBlob)
+        {
+            OutputDebugStringA((char *)pErrorBlob->GetBufferPointer());
+        }
+    }
+
+    if (pErrorBlob)
+    {
+        pErrorBlob->Release();
+        pErrorBlob = nullptr;
+    }
+
+    if (FAILED(hr))
+    {
+        return FALSE;
+    }
+
+    hr = g_pd3dDevice->CreateVertexShader(pVertexShaderBlob->GetBufferPointer(), pVertexShaderBlob->GetBufferSize(), nullptr, &g_pVertexShader);
+    if (FAILED(hr))
+    {
+        pVertexShaderBlob->Release();
+        return hr;
+    }
+
+    // Create vertex input layout 
+
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+    UINT numElements = ARRAYSIZE(layout);
+
+    hr = g_pd3dDevice->CreateInputLayout(layout, numElements, pVertexShaderBlob->GetBufferPointer(),
+        pVertexShaderBlob->GetBufferSize(), &g_pVertexLayout);
+
+    pVertexShaderBlob->Release();
+
+    if (FAILED(hr))
+    {
+        return FALSE;
+    }
+
+    // Set input layout
+
+    g_pd3dDeviceContext->IASetInputLayout(g_pVertexLayout);
+
+    // Compile pixel shader
+
+    ID3DBlob * pPixelShaderBlob = nullptr;
+
+    hr = D3DCompileFromFile(L"shader.foo", nullptr, nullptr, "PS" /* entryPoint */, "ps_4_0" /* szShaderModel */,
+        dwShaderFlags, 0, &pPixelShaderBlob, &pErrorBlob);
+    if (FAILED(hr))
+    {
+        if (pErrorBlob)
+        {
+            OutputDebugStringA((char *)pErrorBlob->GetBufferPointer());
+        }
+    }
+
+    if (pErrorBlob)
+    {
+        pErrorBlob->Release();
+        pErrorBlob = nullptr;
+    }
+
+    if (FAILED(hr))
+    {
+        return FALSE;
+    }
+
+    hr = g_pd3dDevice->CreatePixelShader(pPixelShaderBlob->GetBufferPointer(), pPixelShaderBlob->GetBufferSize(), nullptr, &g_pPixelShader);
+    pPixelShaderBlob->Release();
+    if (FAILED(hr))
+    {
+        return hr;
+    }
+
+    // Create vertex buffer
+
+    SimpleVertex vertices[] =
+    {
+        XMFLOAT3(0.0f, 0.5f, 0.5f),
+        XMFLOAT3(0.5f, -0.5f, 0.5f),
+        XMFLOAT3(-0.5f, -0.5f, 0.5f),
+    };
+    D3D11_BUFFER_DESC bd;
+    ZeroMemory(&bd, sizeof(bd));
+    bd.Usage = D3D11_USAGE_DEFAULT;
+    bd.ByteWidth = sizeof(SimpleVertex) * 3;
+    bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
+    bd.CPUAccessFlags = 0;
+    bd.MiscFlags = 0;
+
+    D3D11_SUBRESOURCE_DATA initData;
+    ZeroMemory(&initData, sizeof(initData));
+    initData.pSysMem = vertices;
+    if (FAILED(g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVertexBuffer)))
+    {
+        return FALSE;
+    }
+
+    // set vertex buffer
+
+    UINT stride = sizeof(SimpleVertex);
+    UINT offset = 0;
+    g_pd3dDeviceContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
+
+    g_pd3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
     return TRUE;
 }
 
 void CleanupDevice()
 {
+    if (g_pVertexShader)
+    {
+        g_pVertexShader->Release();
+        g_pVertexShader = nullptr;
+    }
+
+    if (g_pPixelShader)
+    {
+        g_pPixelShader->Release();
+        g_pPixelShader = nullptr;
+    }
+
+    if (g_pVertexBuffer)
+    {
+        g_pVertexBuffer->Release();
+        g_pVertexBuffer = nullptr;
+    }
+
+    if (g_pVertexLayout)
+    {
+        g_pVertexLayout->Release();
+        g_pVertexLayout = nullptr;
+    }
+
     if (g_pd3dDeviceContext)
     {
         g_pd3dDeviceContext->ClearState();
@@ -215,19 +374,19 @@ void CleanupDevice()
     if (g_pRenderTargetView)
     {
         g_pRenderTargetView->Release();
-        g_pRenderTargetView = NULL;
+        g_pRenderTargetView = nullptr;
     }
 
     if (g_pSwapChain)
     {
         g_pSwapChain->Release();
-        g_pSwapChain = NULL;
+        g_pSwapChain = nullptr;
     }
 
     if (g_pd3dDeviceContext)
     {
         g_pd3dDeviceContext->Release();
-        g_pd3dDeviceContext = NULL;
+        g_pd3dDeviceContext = nullptr;
     }
 
     if (g_pd3dDevice)
@@ -311,5 +470,9 @@ void Render()
 
     float clearColor[4] = { 0.0f, 0.125f, 0.6f, 1.0f }; // RGBA
     g_pd3dDeviceContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
+    g_pd3dDeviceContext->VSSetShader(g_pVertexShader, nullptr, 0);
+    g_pd3dDeviceContext->PSSetShader(g_pPixelShader, nullptr, 0);
+    g_pd3dDeviceContext->Draw(3, 0);
+    
     g_pSwapChain->Present(0, 0);
 }
