@@ -1,4 +1,4 @@
-// DX11-Test.cpp : Defines the entry point for the application.
+// DX11-Test.cpp : displays rendered cube
 //
 
 #include "stdafx.h"
@@ -13,6 +13,15 @@ using namespace DirectX;
 struct SimpleVertex
 {
     XMFLOAT3 f;
+    XMFLOAT4 c;
+};
+
+//  for passing matrices to vertex shader
+struct ConstantBuffer
+{
+    XMMATRIX mWorld;
+    XMMATRIX mView;
+    XMMATRIX mProjection;
 };
 
 // Global Variables:
@@ -30,6 +39,11 @@ ID3D11InputLayout *     g_pVertexLayout = nullptr;
 ID3D11Buffer *          g_pVertexBuffer = nullptr;
 ID3D11VertexShader*     g_pVertexShader = nullptr;
 ID3D11PixelShader*      g_pPixelShader = nullptr;
+ID3D11Buffer *          g_pIndexBuffer = nullptr;
+ID3D11Buffer *          g_pConstantBuffer = nullptr;
+XMMATRIX                g_World;
+XMMATRIX                g_View;
+XMMATRIX                g_Projection;
 
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
@@ -256,6 +270,7 @@ BOOL InitDevice()
 
     D3D11_INPUT_ELEMENT_DESC layout[] = {
         { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
     };
     UINT numElements = ARRAYSIZE(layout);
 
@@ -305,18 +320,24 @@ BOOL InitDevice()
         return hr;
     }
 
-    // Create vertex buffer
+    // Create vertex buffer - Cube
 
     SimpleVertex vertices[] =
     {
-        XMFLOAT3(0.0f, 0.5f, 0.5f),
-        XMFLOAT3(0.5f, -0.5f, 0.5f),
-        XMFLOAT3(-0.5f, -0.5f, 0.5f),
+        { XMFLOAT3(-1.0f,  1.0f, -1.0f), XMFLOAT4(0.0f, 0.0f, 1.0f, 1.0f) },
+        { XMFLOAT3(1.0f,  1.0f, -1.0f), XMFLOAT4(0.0f, 1.0f, 0.0f, 1.0f) },
+        { XMFLOAT3(1.0f,  1.0f,  1.0f), XMFLOAT4(0.0f, 1.0f, 1.0f, 1.0f) },
+        { XMFLOAT3(-1.0f,  1.0f,  1.0f), XMFLOAT4(1.0f, 0.0f, 0.0f, 1.0f) },
+        { XMFLOAT3(-1.0f, -1.0f, -1.0f), XMFLOAT4(1.0f, 0.0f, 1.0f, 1.0f) },
+        { XMFLOAT3(1.0f, -1.0f, -1.0f), XMFLOAT4(1.0f, 1.0f, 0.0f, 1.0f) },
+        { XMFLOAT3(1.0f, -1.0f,  1.0f), XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f) },
+        { XMFLOAT3(-1.0f, -1.0f,  1.0f), XMFLOAT4(0.0f, 0.0f, 0.0f, 1.0f) },
     };
+
     D3D11_BUFFER_DESC bd;
     ZeroMemory(&bd, sizeof(bd));
     bd.Usage = D3D11_USAGE_DEFAULT;
-    bd.ByteWidth = sizeof(SimpleVertex) * 3;
+    bd.ByteWidth = sizeof(SimpleVertex) * ARRAYSIZE(vertices);
     bd.BindFlags = D3D11_BIND_VERTEX_BUFFER;
     bd.CPUAccessFlags = 0;
     bd.MiscFlags = 0;
@@ -335,13 +356,87 @@ BOOL InitDevice()
     UINT offset = 0;
     g_pd3dDeviceContext->IASetVertexBuffers(0, 1, &g_pVertexBuffer, &stride, &offset);
 
+    // Create index buffer
+    WORD indices[] =
+    {
+        3,1,0,
+        2,1,3,
+
+        0,5,4,
+        1,5,0,
+
+        3,4,7,
+        0,4,3,
+
+        1,6,5,
+        2,6,1,
+
+        2,7,6,
+        3,7,2,
+
+        6,4,5,
+        7,4,6,
+    };
+
+    ZeroMemory(&bd, sizeof(bd));
+    bd.Usage = D3D11_USAGE_DEFAULT;
+    bd.ByteWidth = sizeof(WORD) * ARRAYSIZE(indices);
+    bd.BindFlags = D3D11_BIND_INDEX_BUFFER;
+    bd.CPUAccessFlags = 0;
+    bd.MiscFlags = 0;
+
+    ZeroMemory(&initData, sizeof(initData));
+    initData.pSysMem = indices;
+    if (FAILED(g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pIndexBuffer)))
+    {
+        return FALSE;
+    }
+
+    // set index buffer
+    g_pd3dDeviceContext->IASetIndexBuffer(g_pIndexBuffer, DXGI_FORMAT_R16_UINT , 0);
+
     g_pd3dDeviceContext->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+    // Create constant buffer for matrices
+    ZeroMemory(&bd, sizeof(bd));
+    bd.Usage = D3D11_USAGE_DEFAULT;
+    bd.ByteWidth = sizeof(ConstantBuffer);
+    bd.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+    bd.CPUAccessFlags = 0;
+    if (FAILED(g_pd3dDevice->CreateBuffer(&bd, NULL, &g_pConstantBuffer)))
+    {
+        return FALSE;
+    }
+
+    // Initialize world matrix
+    g_World = XMMatrixIdentity();
+
+    // Initialize view matrix
+    XMVECTOR eye = XMVectorSet(0.0f, 1.0f, -5.0f, 0.0f);
+    XMVECTOR at = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+    g_View = XMMatrixLookAtLH(eye, at, up);
+
+    // Initalize projection matrix
+    g_Projection = XMMatrixPerspectiveFovLH(XM_PIDIV2, vp.Width / vp.Height, 0.01f, 100.0f);
 
     return TRUE;
 }
 
 void CleanupDevice()
 {
+    if (g_pIndexBuffer)
+    {
+        g_pIndexBuffer->Release();
+        g_pIndexBuffer = nullptr;
+    }
+
+    if (g_pConstantBuffer)
+    {
+        g_pConstantBuffer->Release();
+        g_pConstantBuffer = nullptr;
+    }
+
     if (g_pVertexShader)
     {
         g_pVertexShader->Release();
@@ -466,13 +561,45 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 
 void Render()
 {
+    // Update our time
+    static float t = 0.0f;
+    if (g_driverType == D3D_DRIVER_TYPE_REFERENCE)
+    {
+        t += (float)XM_PI * 0.0125f;
+    }
+    else
+    {
+        static DWORD dwTimeStart = 0;
+        DWORD dwTimeCur = GetTickCount();
+        if (dwTimeStart == 0)
+            dwTimeStart = dwTimeCur;
+
+        t = (dwTimeCur - dwTimeStart) / 1000.0f;
+    }
+
+    // Animate the cube
+    g_World = XMMatrixRotationY(t);
+
     // clear back buffer
 
     float clearColor[4] = { 0.0f, 0.125f, 0.6f, 1.0f }; // RGBA
     g_pd3dDeviceContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
+
+    // Update constants
+    ConstantBuffer cb;
+    cb.mWorld = XMMatrixTranspose(g_World);
+    cb.mView = XMMatrixTranspose(g_View);
+    cb.mProjection = XMMatrixTranspose(g_Projection);
+    g_pd3dDeviceContext->UpdateSubresource(g_pConstantBuffer, 0, nullptr, &cb, 0, 0);
+
+    // Render cube
+
     g_pd3dDeviceContext->VSSetShader(g_pVertexShader, nullptr, 0);
+    g_pd3dDeviceContext->VSSetConstantBuffers(0, 1, &g_pConstantBuffer);
     g_pd3dDeviceContext->PSSetShader(g_pPixelShader, nullptr, 0);
-    g_pd3dDeviceContext->Draw(3, 0);
+    g_pd3dDeviceContext->DrawIndexed(36, 0, 0);
+
+    // Present back buffer to our front buffer
     
     g_pSwapChain->Present(0, 0);
 }
