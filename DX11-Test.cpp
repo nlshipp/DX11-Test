@@ -45,6 +45,12 @@ XMMATRIX                g_World;
 XMMATRIX                g_View;
 XMMATRIX                g_Projection;
 
+POINT       g_ptStart = { 0, 0 };
+POINT       g_ptCurrent = { 0, 0 };
+WPARAM      g_wParam = 0;
+BOOL        lButtonDown = FALSE;
+BOOL        g_mouseTrack = FALSE;
+
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
 
@@ -55,6 +61,7 @@ BOOL    InitInstance(HINSTANCE, int);
 BOOL    InitDevice();
 void    CleanupDevice();
 void    Render();
+BOOL    MouseHandler(MSG *msg);
 
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
@@ -98,8 +105,18 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         {
             if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
             {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
+                BOOL handled = FALSE;
+
+                if ((msg.message >= WM_MOUSEFIRST && msg.message <= WM_MOUSELAST) || msg.message == WM_MOUSELEAVE)
+                {
+                    handled = MouseHandler(&msg);
+                }
+
+                if (!handled)
+                {
+                    TranslateMessage(&msg);
+                    DispatchMessage(&msg);
+                }
             }
         }
         else
@@ -412,7 +429,7 @@ BOOL InitDevice()
     g_World = XMMatrixIdentity();
 
     // Initialize view matrix
-    XMVECTOR eye = XMVectorSet(0.0f, 1.0f, -5.0f, 0.0f);
+    XMVECTOR eye = XMVectorSet(0.0f, 2.0f, -5.0f, 0.0f);
     XMVECTOR at = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     XMVECTOR up = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
     g_View = XMMatrixLookAtLH(eye, at, up);
@@ -539,6 +556,55 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     return 0;
 }
 
+BOOL MouseHandler(MSG *msg)
+{
+    BOOL handled = FALSE;
+
+    switch (msg->message)
+    {
+    case WM_LBUTTONDOWN:
+        lButtonDown = TRUE;
+        g_ptStart.x = GET_X_LPARAM(msg->lParam);
+        g_ptStart.y = GET_Y_LPARAM(msg->lParam);
+
+        if (!g_mouseTrack)
+        {
+            TRACKMOUSEEVENT tme = { 0 };
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = msg->hwnd;
+            tme.dwHoverTime = HOVER_DEFAULT; // System default hover time
+            if (TrackMouseEvent(&tme))
+            {
+                g_mouseTrack = TRUE;
+            }
+        }
+        break;
+
+    case WM_LBUTTONUP:
+        lButtonDown = FALSE;
+        g_ptStart.x = 0;
+        g_ptStart.y = 0;
+        break;
+
+    case WM_MOUSEMOVE:
+        g_wParam = msg->wParam;
+        g_ptCurrent.x = GET_X_LPARAM(msg->lParam);
+        g_ptCurrent.y = GET_Y_LPARAM(msg->lParam);
+        break;
+
+    case WM_MOUSELEAVE:
+        lButtonDown = FALSE;
+        g_mouseTrack = FALSE;
+        break;
+
+    default:
+        break;
+    }
+
+    return handled;
+}
+
 // Message handler for about box.
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
@@ -567,7 +633,7 @@ void Render()
     {
         t += (float)XM_PI * 0.0125f;
     }
-    else
+    else if (lButtonDown != TRUE)
     {
         static DWORD dwTimeStart = 0;
         DWORD dwTimeCur = GetTickCount();
@@ -578,7 +644,9 @@ void Render()
     }
 
     // Animate the cube
-    g_World = XMMatrixRotationY(t);
+    
+    g_World = XMMatrixMultiply(XMMatrixRotationY(t + (lButtonDown ? (float)(g_ptStart.x - g_ptCurrent.x) / 100.0f : 0)),
+                               lButtonDown ? XMMatrixRotationX((float)(g_ptStart.y - g_ptCurrent.y)/100.0f) : XMMatrixIdentity());
 
     // clear back buffer
 
