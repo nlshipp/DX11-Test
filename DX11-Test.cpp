@@ -625,6 +625,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 
+// generate virtual trackball rotation matrix based on current mouse pointer
 BOOL GenerateRotationMatrix()
 {
     RECT rect;
@@ -638,29 +639,49 @@ BOOL GenerateRotationMatrix()
     LONG midX = (rect.right - rect.left) / 2;
     LONG midY = (rect.bottom - rect.top) / 2;
 
-    vStart.x = (float)(g_ptStart.x - midX) / (float)midX;
-    vStart.y = (float)(midY - g_ptStart.y) / (float)midY;
+    // Scale X and Y by 1.2 to give zone at edges of window for pure rotation about Z axis
+    vStart.x = 1.2f * (float)(g_ptStart.x - midX) / (float)midX;
+    vStart.y = -1.2f * (float)(g_ptStart.y - midY) / (float)midY;
     float startXYsquared = (vStart.x * vStart.x) + (vStart.y * vStart.y);
     
-    vCurrent.x = (float)(g_ptCurrent.x - midX) / (float)midX;
-    vCurrent.y = (float)(midY - g_ptCurrent.y) / (float)midY;
+    vCurrent.x = 1.2f * (float)(g_ptCurrent.x - midX) / (float)midX;
+    vCurrent.y = -1.2f * (float)(g_ptCurrent.y - midY) / (float)midY;
     float currentXYsquared = (vCurrent.x * vCurrent.x) + (vCurrent.y * vCurrent.y);
 
     if (startXYsquared > 1.0f)
-        startXYsquared = 1.0f;
+    {
+        // XY is outside of unit circle, scale back and assume Z is zero
+        vStart.x = vStart.x / sqrtf(startXYsquared);
+        vStart.y = vStart.y / sqrtf(startXYsquared);
+        vStart.z = 0.0f;
+    }
+    else
+    {
+        // Calculate Z of vector inside unit sphere
+        vStart.z = -sqrtf(1.0f - startXYsquared);
+    }
 
     if (currentXYsquared > 1.0f)
-        currentXYsquared = 1.0f;
-
-    vStart.z = -sqrt(1.0 - startXYsquared);
-    vCurrent.z = -sqrt(1.0 - currentXYsquared);
-
-    if (fabs(startXYsquared - currentXYsquared) > 0.0001)
     {
-        XMVECTOR rotationVector = XMVector3Cross(XMLoadFloat3(&vStart), XMLoadFloat3(&vCurrent));
+        // XY is outside of unit circle, scale back and assume Z is zero
+        vCurrent.x = vCurrent.x / sqrtf(currentXYsquared);
+        vCurrent.y = vCurrent.y / sqrtf(currentXYsquared);
+        vCurrent.z = 0.0f;
+    }
+    else
+    {
+        // Calculate Z of vector inside unit sphere
+        vCurrent.z = -sqrtf(1.0f - currentXYsquared);
+    }
 
-        float angle = XMVectorGetX(XMVector3Length(rotationVector)) * XM_PI;
+    XMVECTOR rotationVector = XMVector3Cross(XMLoadFloat3(&vStart), XMLoadFloat3(&vCurrent));
 
+    // Compute rotation angle by magnitude of rotationVector and scale
+    float angle = XMVectorGetX(XMVector3Length(rotationVector)) * XM_PI;
+
+    if (fabsf(angle) > 0.0001f)
+    {
+        // Only generate rotation matrix from a non-zero length rotation vector.
         g_World = XMMatrixRotationAxis(rotationVector, angle);
     }
     else
@@ -668,9 +689,9 @@ BOOL GenerateRotationMatrix()
         g_World = XMMatrixIdentity();
     }
 
-
     return TRUE;
 }
+
 void Render()
 {
     // Update our time
@@ -695,11 +716,11 @@ void Render()
     }
     else
     {
-    // Animate the cube
-    
-    g_World = XMMatrixMultiply(XMMatrixRotationY(t + (lButtonDown ? (float)(g_ptStart.x - g_ptCurrent.x) / 100.0f : 0)),
-                               lButtonDown ? XMMatrixRotationX((float)(g_ptStart.y - g_ptCurrent.y)/100.0f) : XMMatrixIdentity());
+        // Animate the cube
+
+        g_World = XMMatrixRotationY(t);
     }
+
     // clear back buffer
 
     float clearColor[4] = { 0.0f, 0.125f, 0.6f, 1.0f }; // RGBA
