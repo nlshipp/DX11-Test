@@ -625,6 +625,52 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 
+BOOL GenerateRotationMatrix()
+{
+    RECT rect;
+    XMFLOAT3 vStart, vCurrent;
+
+    if (!GetWindowRect(g_hWnd, &rect))
+    {
+        return FALSE;
+    }
+
+    LONG midX = (rect.right - rect.left) / 2;
+    LONG midY = (rect.bottom - rect.top) / 2;
+
+    vStart.x = (float)(g_ptStart.x - midX) / (float)midX;
+    vStart.y = (float)(midY - g_ptStart.y) / (float)midY;
+    float startXYsquared = (vStart.x * vStart.x) + (vStart.y * vStart.y);
+    
+    vCurrent.x = (float)(g_ptCurrent.x - midX) / (float)midX;
+    vCurrent.y = (float)(midY - g_ptCurrent.y) / (float)midY;
+    float currentXYsquared = (vCurrent.x * vCurrent.x) + (vCurrent.y * vCurrent.y);
+
+    if (startXYsquared > 1.0f)
+        startXYsquared = 1.0f;
+
+    if (currentXYsquared > 1.0f)
+        currentXYsquared = 1.0f;
+
+    vStart.z = -sqrt(1.0 - startXYsquared);
+    vCurrent.z = -sqrt(1.0 - currentXYsquared);
+
+    if (fabs(startXYsquared - currentXYsquared) > 0.0001)
+    {
+        XMVECTOR rotationVector = XMVector3Cross(XMLoadFloat3(&vStart), XMLoadFloat3(&vCurrent));
+
+        float angle = XMVectorGetX(XMVector3Length(rotationVector)) * XM_PI;
+
+        g_World = XMMatrixRotationAxis(rotationVector, angle);
+    }
+    else
+    {
+        g_World = XMMatrixIdentity();
+    }
+
+
+    return TRUE;
+}
 void Render()
 {
     // Update our time
@@ -643,17 +689,25 @@ void Render()
         t = (dwTimeCur - dwTimeStart) / 1000.0f;
     }
 
+    if (lButtonDown)
+    {
+        GenerateRotationMatrix();
+    }
+    else
+    {
     // Animate the cube
     
     g_World = XMMatrixMultiply(XMMatrixRotationY(t + (lButtonDown ? (float)(g_ptStart.x - g_ptCurrent.x) / 100.0f : 0)),
                                lButtonDown ? XMMatrixRotationX((float)(g_ptStart.y - g_ptCurrent.y)/100.0f) : XMMatrixIdentity());
-
+    }
     // clear back buffer
 
     float clearColor[4] = { 0.0f, 0.125f, 0.6f, 1.0f }; // RGBA
     g_pd3dDeviceContext->ClearRenderTargetView(g_pRenderTargetView, clearColor);
 
     // Update constants
+    // Note: matrices are transposed because HLSL runs faster with the transposed matrix and having the vector be on the right - matrix x v 
+    // rather than v x matrix.
     ConstantBuffer cb;
     cb.mWorld = XMMatrixTranspose(g_World);
     cb.mView = XMMatrixTranspose(g_View);
