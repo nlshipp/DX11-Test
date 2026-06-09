@@ -285,7 +285,7 @@ HRESULT ReadPort(char *output, DWORD *count)
 
     *count = 0;
 
-    while (1)
+    do 
     {
         hr = readUntilCr(output + *count, &index);
         *count += index;
@@ -303,14 +303,18 @@ HRESULT ReadPort(char *output, DWORD *count)
         {
             break;
         }
-    }
+    } while (*count > 0);
 
     return hr;
 }
 
 HRESULT UpdateDeviceState()
 {
-    const char configString[] = "MSS\r";  // Modeswitch rotation = Streaming, translation = Streaming
+    // Pulse 20 events/sec
+    // Null region, Trans and Rotation to cubic
+    // Modeswitch rotation = Streaming, translation = Streaming
+//    const char configString[] = "P@r@r\rNT\rFT?\rFR?\rMSSV\r";
+    const char configString[] = "P@r@r\rNT\rMSSV\r";
     char response[BUFSIZE];
     HRESULT hr = S_OK;
     DWORD cb = 0;
@@ -363,11 +367,17 @@ HRESULT UpdateDeviceState()
         if ((cb > 0) && (response[0] == 'D'))
         {
             SbState = *(sbVect *)(&response[1]);
-
+            SbState.rx = _byteswap_ushort(SbState.rx);
+            SbState.ry = _byteswap_ushort(SbState.ry);
+            SbState.rz = _byteswap_ushort(SbState.rz);
+            SbState.tx = _byteswap_ushort(SbState.tx);
+            SbState.ty = _byteswap_ushort(SbState.ty);
+            SbState.tz = _byteswap_ushort(SbState.tz);
         }
         else if ((cb > 0) && (response[0] == 'K'))
         {
             SbButtons = *(sbButtons *)(&response[1]);
+            SbButtons.buttons = _byteswap_ushort(SbButtons.buttons);
         }
     }
 
