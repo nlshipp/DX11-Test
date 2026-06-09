@@ -30,12 +30,18 @@
     <ClInclude Include="DX11-Test.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="SpaceBall.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="DX11-Test.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SpaceBall.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

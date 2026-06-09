@@ -1,0 +1,376 @@
+//
+// SpaceBall/Mouse handler
+// Neil Shipp, 2026
+//
+
+#include "stdafx.h"
+
+#define BUFSIZE 256
+
+enum SB_STATE
+{
+    eUNKNOWN,
+    eRESET,
+    eCONFIG,
+    eMODESWITCH,
+    ePOLL
+};
+
+sbVect SbState = { 0 };
+sbButtons SbButtons = { 0 };
+
+extern HWND     g_hWnd;
+static HANDLE   hPort = INVALID_HANDLE_VALUE;
+static char     buf[BUFSIZE];
+static DWORD    head, tail;
+
+static SB_STATE state = eUNKNOWN;
+
+HRESULT readBuffer()
+{
+    HRESULT hr = S_OK;
+
+    if (tail == ((head + 1) % sizeof(buf)))
+    {
+        return -1; // buffer full
+    }
+
+    DWORD space = sizeof(buf) - 1 - (head - tail) % sizeof(buf);
+    DWORD cb;
+
+    // Can perform single read to fill buffer
+    if ((head + space) < sizeof(buf))
+    {
+//        if (!ReadFile(hPort, buf + head, space, &cb, nullptr))
+        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
+        {
+            hr = GetLastError();
+            MessageBoxA(g_hWnd, "Error reading port", "SpaceBall", MB_ICONERROR);
+
+            return hr;
+        }
+
+        head += cb;
+        assert(head < sizeof(buf));
+    }
+    else
+    {
+        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
+//        if (!ReadFile(hPort, buf + head, sizeof(buf) - head, &cb, nullptr))
+        {
+            hr = GetLastError();
+            MessageBoxA(g_hWnd, "Error reading port", "SpaceBall", MB_ICONERROR);
+
+            return hr;
+        }
+
+        if (cb != sizeof(buf) - head)
+        {
+            head = (head + cb) % sizeof(buf);
+            return hr;
+        }
+
+        assert(tail > 0);
+        head = (head + cb) % sizeof(buf);
+
+        if (!ReadFile(hPort, buf + head, space - cb, &cb, nullptr))
+        {
+            hr = GetLastError();
+            MessageBoxA(g_hWnd, "Error reading port", "SpaceBall", MB_ICONERROR);
+
+            return hr;
+        }
+
+        head = (head + cb) % sizeof(buf);
+    }
+
+    return hr;
+}
+
+HRESULT readUntilCr(char *output, DWORD *count)
+{
+    static BOOL escape = FALSE;
+    *count = 0;
+
+    if (tail == head)
+    {
+        // empty buffer
+        return -1;
+    }
+
+    while (tail != head)
+    {
+        if (buf[tail] != '\r' && buf[tail] != '\n' && buf[tail] != '^')
+        {
+            if (escape && buf[tail] == 'S')
+            {
+                output[*count] = 19;
+            }
+            else if (escape && buf[tail] == 'Q')
+            {
+                output[*count] = 17;
+            }
+            else if (escape && buf[tail] == 'M')
+            {
+                output[*count] = 13;
+            }
+            else
+            {
+                output[*count] = buf[tail];
+            }
+            (*count)++;
+            escape = false;
+        }
+
+        if (buf[tail] == '\r')
+            break;
+
+        if (buf[tail] == '^')
+        {
+            if (escape)
+            {
+                output[*count] = '^';
+                (*count)++;
+                escape = FALSE;
+            }
+            else
+            {
+                escape = TRUE;
+            }
+        }
+
+        tail = (tail + 1) % sizeof(buf);
+    }
+
+    if (tail != head)
+    {
+        // consume last CR.
+        tail = (tail + 1) % sizeof(buf);
+    }
+    else
+    {
+        // no CR in buffer
+        return -1;
+    }
+
+    return 0;
+}
+
+HRESULT OpenPort()
+{
+    LPCWSTR port = L"\\\\.\\COM15";
+    HRESULT hr = S_OK;
+
+    hPort = CreateFile(port, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, NULL);
+    if (hPort == INVALID_HANDLE_VALUE)
+    {
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error opening serial port", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+    DCB portState = { 0 };
+    portState.DCBlength = sizeof(DCB);
+
+    if (!GetCommState(hPort, &portState))
+    {
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error retrieving CommState", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+    // 9600 baud 8N1
+    portState.BaudRate = CBR_9600;
+    portState.ByteSize = 8;
+    portState.Parity = NOPARITY;
+    portState.StopBits = ONESTOPBIT;
+    portState.fBinary = TRUE;
+
+    // no DTR, DSR, RTS lines
+    portState.fDtrControl = DTR_CONTROL_ENABLE;
+    portState.fRtsControl = RTS_CONTROL_ENABLE;
+    portState.fDsrSensitivity = FALSE;
+
+    // use X-ON/X-OFF handshaking
+    portState.fOutxCtsFlow = FALSE;
+    portState.fOutxDsrFlow = FALSE;
+    portState.fInX = TRUE;
+    portState.fOutX = TRUE;
+    portState.fTXContinueOnXoff = TRUE;
+    portState.XoffChar = 19;
+    portState.XonChar = 17;
+
+    if (!SetCommState(hPort, &portState))
+    {
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error setting CommState", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+    COMMTIMEOUTS timeouts = { 0 };
+    if (!GetCommTimeouts(hPort, &timeouts))
+    {
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error getting CommTimeouts", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+/*
+    // blocking reads
+    timeouts.ReadIntervalTimeout = 50;
+    timeouts.ReadTotalTimeoutMultiplier = 1;
+    timeouts.ReadTotalTimeoutConstant = 200;
+*/
+    // non-blocking reads
+    timeouts.ReadIntervalTimeout = MAXDWORD;
+    timeouts.ReadTotalTimeoutConstant = 0;
+    timeouts.ReadTotalTimeoutMultiplier = 0;
+
+    if (!SetCommTimeouts(hPort, &timeouts))
+    {
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error setting CommTimeouts", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+    head = 0;
+    tail = 0;
+
+    state = eUNKNOWN;
+
+    return hr;
+}
+
+HRESULT ClosePort()
+{
+    HRESULT hr = S_OK;
+
+    if (!CloseHandle(hPort))
+    { 
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error closing port", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+    return hr;
+}
+
+HRESULT ConfigureDevice()
+{
+    HRESULT hr = S_OK;
+    char resetString[] = "\r@RESET\r";
+    DWORD cb = 0;
+
+    if (!WriteFile(hPort, resetString, strlen(resetString), &cb, nullptr))
+    {
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error sending reset", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+    return hr;
+}
+
+HRESULT ReadPort(char *output, DWORD *count)
+{
+    HRESULT hr;
+    DWORD index = 0;
+
+    *count = 0;
+
+    while (1)
+    {
+        hr = readUntilCr(output + *count, &index);
+        *count += index;
+        if (hr == 0)
+        {
+            break;
+        }
+
+        if (hr == -1)
+        {
+            hr = readBuffer();
+        }
+
+        if (hr != 0)
+        {
+            break;
+        }
+    }
+
+    return hr;
+}
+
+HRESULT UpdateDeviceState()
+{
+    const char configString[] = "MSS\r";  // Modeswitch rotation = Streaming, translation = Streaming
+    char response[BUFSIZE];
+    HRESULT hr = S_OK;
+    DWORD cb = 0;
+
+    // Expect the occasional response, poll the device
+    if (state != eUNKNOWN)
+    {
+        hr = ReadPort(response, &cb);
+        if (FAILED(hr))
+        {
+            return hr;
+        }
+    }
+
+    switch (state)
+    {
+    case eUNKNOWN:
+        hr = ConfigureDevice();
+        if (SUCCEEDED(hr))
+            state = eRESET;
+        break;
+
+    case eRESET:
+        if ((cb > 0) && (response[0] == '@'))
+        {
+            state = eCONFIG;
+        }
+        break;
+
+    case eCONFIG:
+        if (!WriteFile(hPort, configString, strlen(configString), &cb, nullptr))
+        {
+            hr = GetLastError();
+            MessageBoxA(g_hWnd, "Error sending config string", "SpaceBall", MB_ICONERROR);
+        }
+        else
+        {
+            state = eMODESWITCH;
+        }
+        break;
+
+    case eMODESWITCH:
+        if ((cb > 0) && (response[0] == 'M'))
+        {
+            state = ePOLL;
+        }
+        break;
+
+    case ePOLL:
+        if ((cb > 0) && (response[0] == 'D'))
+        {
+            SbState = *(sbVect *)(&response[1]);
+
+        }
+        else if ((cb > 0) && (response[0] == 'K'))
+        {
+            SbButtons = *(sbButtons *)(&response[1]);
+        }
+    }
+
+    return hr;
+}
+

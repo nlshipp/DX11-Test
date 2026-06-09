@@ -94,6 +94,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         return FALSE;
     }
 
+    OpenPort();
+
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_DX11TEST));
 
     MSG msg = { 0 };
@@ -101,6 +103,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     // Main message loop:
     while (WM_QUIT != msg.message)
     {
+        UpdateDeviceState();
+
         if (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE))
         {
             if (!TranslateAccelerator(msg.hwnd, hAccelTable, &msg))
@@ -126,6 +130,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     }
 
     CleanupDevice();
+
+    ClosePort();
 
     return (int) msg.wParam;
 }
