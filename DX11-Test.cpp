@@ -50,6 +50,7 @@ POINT       g_ptCurrent = { 0, 0 };
 WPARAM      g_wParam = 0;
 BOOL        lButtonDown = FALSE;
 BOOL        g_mouseTrack = FALSE;
+BOOL        g_SpaceballPick = FALSE;
 
 WCHAR szTitle[MAX_LOADSTRING];                  // The title bar text
 WCHAR szWindowClass[MAX_LOADSTRING];            // the main window class name
@@ -62,6 +63,7 @@ BOOL    InitDevice();
 void    CleanupDevice();
 void    Render();
 BOOL    MouseHandler(MSG *msg);
+void    GenerateSpaceballRotationMatrix();
 
 LRESULT CALLBACK    WndProc(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK    About(HWND, UINT, WPARAM, LPARAM);
@@ -631,6 +633,14 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 
+void GenerateSpaceballRotationMatrix()
+{
+    g_World = XMMatrixRotationRollPitchYaw(
+        -16.0f * XM_2PI * (float)SbState.rx / (float)MAXWORD,
+        -16.0f * XM_2PI * (float)SbState.ry / (float)MAXWORD,
+        -16.0f * XM_2PI * (float)SbState.rz / (float)MAXWORD);
+}
+
 // generate virtual trackball rotation matrix based on current mouse pointer
 BOOL GenerateRotationMatrix()
 {
@@ -716,9 +726,21 @@ void Render()
         t = (dwTimeCur - dwTimeStart) / 1000.0f;
     }
 
+    static int16_t lastButtons = 0;
+
+    if ((SbButtons.buttons & SB_BTN_PICK) && !(lastButtons & SB_BTN_PICK))
+    {
+        g_SpaceballPick = !g_SpaceballPick;
+    }
+    lastButtons = SbButtons.buttons;
+
     if (lButtonDown)
     {
         GenerateRotationMatrix();
+    }
+    else if (g_SpaceballPick) // (SbState.rx != 0 || SbState.ry != 0 || SbState.rz != 0)
+    {
+        GenerateSpaceballRotationMatrix();
     }
     else
     {
