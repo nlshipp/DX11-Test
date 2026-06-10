@@ -90,6 +90,7 @@ HRESULT readBuffer()
 HRESULT readUntilCr(char *output, DWORD *count)
 {
     static BOOL escape = FALSE;
+    static char lastChar = '\r';
     *count = 0;
 
     if (tail == head)
@@ -100,7 +101,7 @@ HRESULT readUntilCr(char *output, DWORD *count)
 
     while (tail != head)
     {
-        if (buf[tail] != '\r' && buf[tail] != '\n' && buf[tail] != '^')
+        if (buf[tail] != '\r' && buf[tail] != '^' && buf[tail] != '\n')
         {
             if (escape && buf[tail] == 'S')
             {
@@ -125,6 +126,13 @@ HRESULT readUntilCr(char *output, DWORD *count)
         if (buf[tail] == '\r')
             break;
 
+        if (buf[tail] == '\n' && lastChar != '\r')
+        {
+            output[*count] = '\n';
+            (*count)++;
+            escape = false;
+        }
+
         if (buf[tail] == '^')
         {
             if (escape)
@@ -139,6 +147,7 @@ HRESULT readUntilCr(char *output, DWORD *count)
             }
         }
 
+        lastChar = buf[tail];
         tail = (tail + 1) % sizeof(buf);
     }
 
