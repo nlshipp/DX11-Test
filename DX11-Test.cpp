@@ -633,12 +633,41 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 
+XMMATRIX rotation;
+
 void GenerateSpaceballRotationMatrix()
 {
-    g_World = XMMatrixRotationRollPitchYaw(
+    static XMFLOAT3 Vcur, Vlast;
+    XMVECTOR Vcross;
+
+    Vlast = Vcur;
+    Vcur = XMFLOAT3(SbState.rx, SbState.ry, SbState.rz);
+    float limit = 1000.0f;
+
+    if (fabsf(Vcur.x - Vlast.x) > limit || fabsf(Vcur.y - Vlast.y) > limit || fabsf(Vcur.z - Vlast.z) > limit)
+    {
+        Vcross = XMVector3Cross(XMLoadFloat3(&Vcur), XMLoadFloat3(&Vlast));
+    }
+
+    rotation = XMMatrixRotationRollPitchYaw(
         -16.0f * XM_2PI * (float)SbState.rx / (float)MAXWORD,
         -16.0f * XM_2PI * (float)SbState.ry / (float)MAXWORD,
         -16.0f * XM_2PI * (float)SbState.rz / (float)MAXWORD);
+
+    float cos_x = cosf(-16.0f * XM_2PI * (float)SbState.rz / (float)MAXWORD);
+    float cos_y = cosf(16.0f * XM_2PI * (float)SbState.ry / (float)MAXWORD);
+    float cos_z = cosf(-16.0f * XM_2PI * (float)SbState.rx / (float)MAXWORD);
+    float sin_x = sinf(-16.0f * XM_2PI * (float)SbState.rz / (float)MAXWORD);
+    float sin_y = sinf(16.0f * XM_2PI * (float)SbState.ry / (float)MAXWORD);
+    float sin_z = sinf(-16.0f * XM_2PI * (float)SbState.rx / (float)MAXWORD);
+
+    g_World = XMMATRIX(
+        cos_x * cos_y , sin_x * cos_z - cos_x * sin_y * sin_z, sin_x * sin_z + cos_x * sin_y * cos_z, 0,
+        -sin_x * cos_y, cos_x * cos_z + sin_x * sin_y * sin_z, cos_x * sin_z - sin_x * sin_y * cos_z, 0,
+        -sin_y        , - cos_y * sin_z                      , cos_y * cos_z,                         0,
+        0, 0, 0, 1);
+    
+
 }
 
 // generate virtual trackball rotation matrix based on current mouse pointer
