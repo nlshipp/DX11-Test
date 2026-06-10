@@ -19,15 +19,23 @@ enum SB_STATE
 sbVect SbState = { 0 };
 sbButtons SbButtons = { 0 };
 
-extern HWND     g_hWnd;
-static HANDLE   hPort = INVALID_HANDLE_VALUE;
-static char     buf[BUFSIZE];
-static DWORD    head, tail;
+extern HWND     g_hWnd;     // handle to hWnd to use for MessageBoxA
 
-static SB_STATE state = eUNKNOWN;
+static HANDLE   hPort = INVALID_HANDLE_VALUE;   // serial port handle
 
+static char     buf[BUFSIZE];       // circular buffer
+static DWORD    head, tail;         // head is writer index, tail is reader index.
+
+static SB_STATE state = eUNKNOWN;   // Spaceball state
+
+// 
+// Attempt to fill circular buffer with data from serial port
+//   When head == tail, buffer is empty.
+//   When head+1 == tail (modulo buf size), buffer is full.
+//
 HRESULT readBuffer()
 {
+    DWORD cb;
     HRESULT hr = S_OK;
 
     if (tail == ((head + 1) % sizeof(buf)))
@@ -35,14 +43,15 @@ HRESULT readBuffer()
         return -1; // buffer full
     }
 
-    DWORD space = sizeof(buf) - 1 - (head - tail) % sizeof(buf);
-    DWORD cb;
+    // calculate free space in buffer
+    DWORD bufSize = (head - tail) % sizeof(buf);
+    DWORD space = sizeof(buf) - (bufSize + 1);
 
-    // Can perform single read to fill buffer
+    // Read can't overflow buffer
     if ((head + space) < sizeof(buf))
     {
-//        if (!ReadFile(hPort, buf + head, space, &cb, nullptr))
-        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
+//        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
+        if (!ReadFile(hPort, buf + head, space, &cb, nullptr))
         {
             hr = GetLastError();
             MessageBoxA(g_hWnd, "Error reading port", "SpaceBall", MB_ICONERROR);
@@ -53,10 +62,10 @@ HRESULT readBuffer()
         head += cb;
         assert(head < sizeof(buf));
     }
-    else
+    else // Two reads required to fill buffer
     {
-        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
-//        if (!ReadFile(hPort, buf + head, sizeof(buf) - head, &cb, nullptr))
+//        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
+        if (!ReadFile(hPort, buf + head, sizeof(buf) - head, &cb, nullptr))
         {
             hr = GetLastError();
             MessageBoxA(g_hWnd, "Error reading port", "SpaceBall", MB_ICONERROR);
@@ -64,16 +73,21 @@ HRESULT readBuffer()
             return hr;
         }
 
+        // less data read than asked for, update head index and exit
         if (cb != sizeof(buf) - head)
         {
             head = (head + cb) % sizeof(buf);
             return hr;
         }
 
-        assert(tail > 0);
+        // update head index and attempt to read more
         head = (head + cb) % sizeof(buf);
+        space -= cb;
 
-        if (!ReadFile(hPort, buf + head, space - cb, &cb, nullptr))
+        assert(head == 0);
+        assert(tail > space);
+
+        if (!ReadFile(hPort, buf + head, space, &cb, nullptr))
         {
             hr = GetLastError();
             MessageBoxA(g_hWnd, "Error reading port", "SpaceBall", MB_ICONERROR);
