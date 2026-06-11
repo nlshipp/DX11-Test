@@ -665,7 +665,7 @@ void GenerateSpaceballRotationMatrix()
         cos_x * cos_y , sin_x * cos_z - cos_x * sin_y * sin_z, sin_x * sin_z + cos_x * sin_y * cos_z, 0,
         -sin_x * cos_y, cos_x * cos_z + sin_x * sin_y * sin_z, cos_x * sin_z - sin_x * sin_y * cos_z, 0,
         -sin_y        , - cos_y * sin_z                      , cos_y * cos_z,                         0,
-        0, 0, 0, 1);
+        0, 0, 0, 1) * XMMatrixTranslation((float)SbState.tx / 256.0f, (float)SbState.ty / 256.0f, (float)SbState.tz / 256.0f);
     
 
 }
@@ -761,6 +761,27 @@ void Render()
     {
         g_SpaceballPick = !g_SpaceballPick;
     }
+
+    if ((SbButtons.buttons & SB_BTN_1) && !(lastButtons & SB_BTN_1))
+    {
+        writeCommand("FBp\r");
+    }
+
+    if ((SbButtons.buttons & SB_BTN_2) && !(lastButtons & SB_BTN_2))
+    {
+        writeCommand("FB`\r");
+    }
+
+    if ((SbButtons.buttons & SB_BTN_3) && !(lastButtons & SB_BTN_3))
+    {
+        writeCommand("FBP\r");
+    }
+
+    if ((SbButtons.buttons & SB_BTN_4) && !(lastButtons & SB_BTN_4))
+    {
+        writeCommand("FB@\r");
+    }
+
     lastButtons = SbButtons.buttons;
 
     if (lButtonDown)

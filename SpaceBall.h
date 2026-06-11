@@ -7,6 +7,7 @@
 HRESULT OpenPort();
 HRESULT ClosePort();
 HRESULT UpdateDeviceState();
+HRESULT writeCommand(const char *);
 
 #pragma pack(push,2)
 struct sbVect
