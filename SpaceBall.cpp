@@ -11,13 +11,27 @@ enum SB_STATE
 {
     eUNKNOWN,
     eRESET,
+    eRESET_MSG,
     eCONFIG,
+    eCONFIG_MSG,
     eMODESWITCH,
+    eMODESWITCH_MSG,
     ePOLL
 };
 
 sbVect SbState = { 0 };
+uint16_t SbConfigIdx = 0;
 sbButtons SbButtons = { 0 };
+
+const char* resetString = "@RESET\r";
+const char* configStrings[] = {
+    "CBT\r",    // Communication Binary mode + 20 tenths of a second x-on timeout- 0x54 (T) & 0x3f = 20
+    "P@r@r\r",  // Pulse data/request packets maxpulse,minpulse = 50ms, 50ms - 0x40 (@) 0x72 (r) & 0x3f 0x3f
+    "NT\r",     // Null region size- 0x54 (T) & 0x3f = 0x14 ?@A..Z[\]^_`a..z{|} 0x3f..0x7e
+    "FBp\r",    // Feel [T|F|Both]p = 0x70 (p) & 0x3F = 0x30 ?@A..Z[\]^_`a..z{|} 0x3f..0x7e
+    "L+\r"      // button click noise
+};
+const char* modeSwitchString = "MSSV\r";
 
 extern HWND     g_hWnd;     // handle to hWnd to use for MessageBoxA
 
@@ -179,6 +193,30 @@ HRESULT readUntilCr(char *output, DWORD *count)
     return 0;
 }
 
+
+HRESULT writeCommand(const char *commandString)
+{
+    HRESULT hr = S_OK;
+    DWORD cb = 0;
+    DWORD cbCmd = strlen(commandString);
+
+    if (!WriteFile(hPort, commandString, cbCmd, &cb, nullptr))
+    {
+        hr = GetLastError();
+        MessageBoxA(g_hWnd, "Error sending reset", "SpaceBall", MB_ICONERROR);
+
+        return hr;
+    }
+
+    if (cb != cbCmd)
+    {
+        MessageBoxA(g_hWnd, "Not all command sent to device", "SpaceBall", MB_ICONERROR);
+    }
+
+    return hr;
+}
+
+
 HRESULT OpenPort()
 {
     LPCWSTR port = L"\\\\.\\COM15";
@@ -264,6 +302,19 @@ HRESULT OpenPort()
     head = 0;
     tail = 0;
 
+    // clear any stale data on port
+    do
+    {
+        head = 0;
+        tail = 0;
+
+        readBuffer();
+
+    } while (tail != head);
+
+    head = 0;
+    tail = 0;
+
     state = eUNKNOWN;
 
     return hr;
@@ -277,23 +328,6 @@ HRESULT ClosePort()
     { 
         hr = GetLastError();
         MessageBoxA(g_hWnd, "Error closing port", "SpaceBall", MB_ICONERROR);
-
-        return hr;
-    }
-
-    return hr;
-}
-
-HRESULT ConfigureDevice()
-{
-    HRESULT hr = S_OK;
-    char resetString[] = "\r@RESET\r";
-    DWORD cb = 0;
-
-    if (!WriteFile(hPort, resetString, strlen(resetString), &cb, nullptr))
-    {
-        hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error sending reset", "SpaceBall", MB_ICONERROR);
 
         return hr;
     }
@@ -333,11 +367,6 @@ HRESULT ReadPort(char *output, DWORD *count)
 
 HRESULT UpdateDeviceState()
 {
-    // Pulse 20 events/sec
-    // Null region, Trans and Rotation to cubic
-    // Modeswitch rotation = Streaming, translation = Streaming
-//    const char configString[] = "P@r@r\rNT\rFT?\rFR?\rMSSV\r";
-    const char configString[] = "P@r@r\rNT\rMSSV\r";
     char response[BUFSIZE];
     HRESULT hr = S_OK;
     DWORD cb = 0;
@@ -355,12 +384,22 @@ HRESULT UpdateDeviceState()
     switch (state)
     {
     case eUNKNOWN:
-        hr = ConfigureDevice();
+        SbConfigIdx = 0;
+        hr = writeCommand("\r");
         if (SUCCEEDED(hr))
-            state = eRESET;
+            state = eCONFIG;
         break;
 
     case eRESET:
+        SbConfigIdx = 0;
+        hr = writeCommand(resetString);
+        if (SUCCEEDED(hr))
+        {
+            state = eRESET_MSG;
+        }
+        break;
+
+    case eRESET_MSG:
         if ((cb > 0) && (response[0] == '@'))
         {
             state = eCONFIG;
@@ -368,19 +407,40 @@ HRESULT UpdateDeviceState()
         break;
 
     case eCONFIG:
-        if (!WriteFile(hPort, configString, strlen(configString), &cb, nullptr))
+        assert(SbConfigIdx < ARRAYSIZE(configStrings));
+
+        hr = writeCommand(configStrings[SbConfigIdx]);
+        if (SUCCEEDED(hr))
         {
-            hr = GetLastError();
-            MessageBoxA(g_hWnd, "Error sending config string", "SpaceBall", MB_ICONERROR);
+            state = eCONFIG_MSG;
         }
-        else
+        break;
+
+    case eCONFIG_MSG:
+        if ((cb > 0) && (response[0] == configStrings[SbConfigIdx][0]))
         {
-            state = eMODESWITCH;
+            SbConfigIdx++;
+            if (SbConfigIdx < ARRAYSIZE(configStrings))
+            {
+                state = eCONFIG;
+            }
+            else
+            {
+                state = eMODESWITCH;
+            }
         }
         break;
 
     case eMODESWITCH:
-        if ((cb > 0) && (response[0] == 'M'))
+        hr = writeCommand(modeSwitchString);
+        if (SUCCEEDED(hr))
+        {
+            state = eMODESWITCH_MSG;
+        }
+        break;
+
+    case eMODESWITCH_MSG:
+        if ((cb > 0) && (response[0] == modeSwitchString[0]))
         {
             state = ePOLL;
         }
