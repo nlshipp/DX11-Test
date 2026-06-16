@@ -19,10 +19,19 @@ enum SB_STATE
     ePOLL
 };
 
+enum SB_DEVICE
+{
+    eNONE,
+    eSPACEBALL,
+    eSPACEMOUSE
+};
+
+
 sbVect SbState = { 0 };
 uint16_t SbConfigIdx = 0;
 sbButtons SbButtons = { 0 };
 
+/*
 const char* resetString = "@RESET\r";
 const char* configStrings[] = {
     "CBT\r",    // Communication Binary mode + 20 tenths of a second x-on timeout- 0x54 (T) & 0x3f = 20
@@ -32,6 +41,17 @@ const char* configStrings[] = {
     "L+\r"      // button click noise
 };
 const char* modeSwitchString = "MSSV\r";
+*/
+
+const char* configStrings[] = {
+    "c00\r",    // compress mode
+    "m3\r",     // mode - translation + rotation
+    "pAA\r",    // pulse period 40ms min, 40ms max
+    "qHH\r",    // sensitivity = 8
+    "nH\r",     // null radius = 8
+    "l000\r"    // turn off LEDs
+};
+const char* modeSwitchString = "c33\r";    // compress mode - translation + rotation, ext key + compress
 
 extern HWND     g_hWnd;     // handle to hWnd to use for MessageBoxA
 
@@ -40,6 +60,7 @@ static HANDLE   hPort = INVALID_HANDLE_VALUE;   // serial port handle
 static char     buf[BUFSIZE];       // circular buffer
 static DWORD    head, tail;         // head is writer index, tail is reader index.
 
+static SB_DEVICE device = eNONE;
 static SB_STATE state = eUNKNOWN;   // Spaceball state
 
 // 
@@ -115,6 +136,7 @@ HRESULT readBuffer()
     return hr;
 }
 
+#if 0
 HRESULT readUntilCr(char *output, DWORD *count)
 {
     static BOOL escape = FALSE;
@@ -192,7 +214,55 @@ HRESULT readUntilCr(char *output, DWORD *count)
 
     return 0;
 }
+#else
+HRESULT readUntilCr(char *output, DWORD *count)
+{
+    static BOOL escape = FALSE;
+    static char lastChar = '\r';
+    *count = 0;
 
+    if (tail == head)
+    {
+        // empty buffer
+        return -1;
+    }
+
+    while (tail != head)
+    {
+        if (buf[tail] != '\r' && buf[tail] != '\n')
+        {
+            output[*count] = buf[tail];
+            (*count)++;
+        }
+
+        if (buf[tail] == '\r')
+            break;
+
+        if (buf[tail] == '\n' && lastChar != '\r')
+        {
+            output[*count] = '\n';
+            (*count)++;
+            escape = false;
+        }
+
+        lastChar = buf[tail];
+        tail = (tail + 1) % sizeof(buf);
+    }
+
+    if (tail != head)
+    {
+        // consume last CR.
+        tail = (tail + 1) % sizeof(buf);
+    }
+    else
+    {
+        // no CR in buffer
+        return -1;
+    }
+
+    return 0;
+}
+#endif
 
 HRESULT writeCommand(const char *commandString)
 {
@@ -242,23 +312,25 @@ HRESULT OpenPort()
         return hr;
     }
 
-    // 9600 baud 8N1
+    // 9600 baud 8N2
     portState.BaudRate = CBR_9600;
     portState.ByteSize = 8;
     portState.Parity = NOPARITY;
+//    portState.StopBits = TWOSTOPBITS;
     portState.StopBits = ONESTOPBIT;
     portState.fBinary = TRUE;
 
-    // no DTR, DSR, RTS lines
+    // Enable DTR and RTS lines
+    // Disable DSR sensitivity
     portState.fDtrControl = DTR_CONTROL_ENABLE;
     portState.fRtsControl = RTS_CONTROL_ENABLE;
     portState.fDsrSensitivity = FALSE;
 
-    // use X-ON/X-OFF handshaking
-    portState.fOutxCtsFlow = FALSE;
+    // use CTS handshaking
+    portState.fOutxCtsFlow = TRUE;
     portState.fOutxDsrFlow = FALSE;
-    portState.fInX = TRUE;
-    portState.fOutX = TRUE;
+    portState.fInX = FALSE;
+    portState.fOutX = FALSE;
     portState.fTXContinueOnXoff = TRUE;
     portState.XoffChar = 19;
     portState.XonChar = 17;
@@ -302,6 +374,8 @@ HRESULT OpenPort()
     head = 0;
     tail = 0;
 
+    Sleep(200);
+
     // clear any stale data on port
     do
     {
@@ -316,6 +390,7 @@ HRESULT OpenPort()
     tail = 0;
 
     state = eUNKNOWN;
+    device = eNONE;
 
     return hr;
 }
@@ -344,6 +419,11 @@ HRESULT ReadPort(char *output, DWORD *count)
 
     do 
     {
+        if (*count > 128)
+        {
+            *count = 0;
+            return hr;
+        }
         hr = readUntilCr(output + *count, &index);
         *count += index;
         if (hr == 0)
@@ -384,12 +464,18 @@ HRESULT UpdateDeviceState()
     switch (state)
     {
     case eUNKNOWN:
+        DWORD status;
+        hr = GetCommModemStatus(hPort, &status);
+        if (FAILED(hr))
+        {
+            MessageBoxA(g_hWnd, "GetCommModemStatus returned error", "SpaceBall", MB_ICONERROR);
+        }
         SbConfigIdx = 0;
         hr = writeCommand("\r");
         if (SUCCEEDED(hr))
             state = eCONFIG;
         break;
-
+/*
     case eRESET:
         SbConfigIdx = 0;
         hr = writeCommand(resetString);
@@ -405,7 +491,7 @@ HRESULT UpdateDeviceState()
             state = eCONFIG;
         }
         break;
-
+*/
     case eCONFIG:
         assert(SbConfigIdx < ARRAYSIZE(configStrings));
 
@@ -461,6 +547,27 @@ HRESULT UpdateDeviceState()
         {
             SbButtons = *(sbButtons *)(&response[1]);
             SbButtons.buttons = _byteswap_ushort(SbButtons.buttons);
+        }
+        else if ((cb > 0) && (response[0] == 'd'))
+        {
+            // compare checksums
+            uint16_t cs = (uint8_t)response[1] + (uint8_t)response[2] + (uint8_t)response[3] + (uint8_t)response[4] +
+                (uint8_t)response[5] + (uint8_t)response[6] + (uint8_t)response[7] + (uint8_t)response[8] +
+                (uint8_t)response[9] + (uint8_t)response[10] + (uint8_t)response[11] + (uint8_t)response[12];
+            uint16_t cs2 = ((response[13] & 0x3F) << 6) | (response[14] & 0x3F);
+            if (cs == cs2)
+            {
+                SbState.tx = (((response[1] & 0x3F) << 6) | (response[2] & 0x3F)) - 2048;
+                SbState.ty = (((response[3] & 0x3F) << 6) | (response[4] & 0x3F)) - 2048;
+                SbState.tz = -((((response[5] & 0x3F) << 6) | (response[6] & 0x3F)) - 2048);
+                SbState.rx = (((response[7] & 0x3F) << 6) | (response[8] & 0x3F)) - 2048;
+                SbState.ry = ((((response[9] & 0x3F) << 6) | (response[10] & 0x3F)) - 2048);
+                SbState.rz = -((((response[11] & 0x3F) << 6) | (response[12] & 0x3F)) - 2048);
+            }
+        }
+        else if ((cb > 0) && (response[0] == 'k'))
+        {
+            SbButtons.buttons = (response[1] & 0x0f) | ((response[2] << 8) & 0xf00) | ((response[3] << 12) & 0xf000);
         }
     }
 
