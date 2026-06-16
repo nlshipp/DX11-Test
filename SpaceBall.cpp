@@ -7,6 +7,8 @@
 
 #define BUFSIZE 256
 
+#define USE_SPACEBALL 1
+
 enum SB_STATE
 {
     eUNKNOWN,
@@ -24,7 +26,8 @@ uint16_t SbConfigIdx = 0;
 sbButtons SbButtons = { 0 };
 SB_DEVICE SbDevice = eNONE;
 
-/*
+#if USE_SPACEBALL
+
 const char* resetString = "@RESET\r";
 const char* configStrings[] = {
     "CBT\r",    // Communication Binary mode + 20 tenths of a second x-on timeout- 0x54 (T) & 0x3f = 20
@@ -34,11 +37,8 @@ const char* configStrings[] = {
     "L+\r"      // button click noise
 };
 const char* modeSwitchString = "MSSV\r";
-*/
 
-const char  nibbleValues[] = {
-    0x30, 0x41, 0x42, 0x33, 0x44, 0x35, 0x36, 0x47, 0x48, 0x39, 0x3A, 0x4B, 0x3C, 0x4D, 0x4E, 0x3F
-};
+#else
 
 const char* configStrings[] = {
     "c00\r",    // compress mode
@@ -49,6 +49,12 @@ const char* configStrings[] = {
     "l000\r"    // turn off LEDs
 };
 const char* modeSwitchString = "c33\r";    // compress mode - translation + rotation, ext key + compress
+
+#endif
+
+const char  nibbleValues[] = {
+    0x30, 0x41, 0x42, 0x33, 0x44, 0x35, 0x36, 0x47, 0x48, 0x39, 0x3A, 0x4B, 0x3C, 0x4D, 0x4E, 0x3F
+};
 
 extern HWND     g_hWnd;     // handle to hWnd to use for MessageBoxA
 
@@ -135,7 +141,7 @@ HRESULT readBuffer()
     return hr;
 }
 
-#if 0
+#if USE_SPACEBALL
 HRESULT readUntilCr(char *output, DWORD *count)
 {
     static BOOL escape = FALSE;
@@ -315,7 +321,7 @@ HRESULT OpenPort()
     portState.BaudRate = CBR_9600;
     portState.ByteSize = 8;
     portState.Parity = NOPARITY;
-//    portState.StopBits = TWOSTOPBITS;
+
     portState.StopBits = ONESTOPBIT;
     portState.fBinary = TRUE;
 
@@ -334,6 +340,21 @@ HRESULT OpenPort()
     portState.XoffChar = 19;
     portState.XonChar = 17;
 
+#if USE_SPACEBALL
+    // use X-ON/OFF handshaking
+    portState.fOutxCtsFlow = FALSE;
+    portState.fOutxDsrFlow = FALSE;
+    portState.fInX = TRUE;
+    portState.fOutX = TRUE;
+
+//    portState.StopBits = TWOSTOPBITS;
+#else
+    // use CTS handshaking
+    portState.fOutxCtsFlow = TRUE;
+    portState.fOutxDsrFlow = FALSE;
+    portState.fInX = FALSE;
+    portState.fOutX = FALSE;
+#endif
     if (!SetCommState(hPort, &portState))
     {
         hr = GetLastError();
@@ -391,7 +412,11 @@ HRESULT OpenPort()
     state = eUNKNOWN;
     SbDevice = eNONE;
 
+#if USE_SPACEBALL
+    SbDevice = eSPACEBALL;
+#else
     SbDevice = eSPACEMOUSE;
+#endif
 
     return hr;
 }
@@ -476,7 +501,8 @@ HRESULT UpdateDeviceState()
         if (SUCCEEDED(hr))
             state = eCONFIG;
         break;
-/*
+
+#if USE_SPACEBALL
     case eRESET:
         SbConfigIdx = 0;
         hr = writeCommand(resetString);
@@ -492,7 +518,7 @@ HRESULT UpdateDeviceState()
             state = eCONFIG;
         }
         break;
-*/
+#endif
     case eCONFIG:
         assert(SbConfigIdx < ARRAYSIZE(configStrings));
 
