@@ -19,17 +19,10 @@ enum SB_STATE
     ePOLL
 };
 
-enum SB_DEVICE
-{
-    eNONE,
-    eSPACEBALL,
-    eSPACEMOUSE
-};
-
-
 sbVect SbState = { 0 };
 uint16_t SbConfigIdx = 0;
 sbButtons SbButtons = { 0 };
+SB_DEVICE SbDevice = eNONE;
 
 /*
 const char* resetString = "@RESET\r";
@@ -42,6 +35,10 @@ const char* configStrings[] = {
 };
 const char* modeSwitchString = "MSSV\r";
 */
+
+const char  nibbleValues[] = {
+    0x30, 0x41, 0x42, 0x33, 0x44, 0x35, 0x36, 0x47, 0x48, 0x39, 0x3A, 0x4B, 0x3C, 0x4D, 0x4E, 0x3F
+};
 
 const char* configStrings[] = {
     "c00\r",    // compress mode
@@ -60,8 +57,10 @@ static HANDLE   hPort = INVALID_HANDLE_VALUE;   // serial port handle
 static char     buf[BUFSIZE];       // circular buffer
 static DWORD    head, tail;         // head is writer index, tail is reader index.
 
-static SB_DEVICE device = eNONE;
 static SB_STATE state = eUNKNOWN;   // Spaceball state
+static char     nullRegion = 0;     // Device null region
+static char     rotationSensitivity = 0;    // Sensitivity
+static char     translationSensitivity = 0;    // Sensitivity
 
 // 
 // Attempt to fill circular buffer with data from serial port
@@ -390,7 +389,9 @@ HRESULT OpenPort()
     tail = 0;
 
     state = eUNKNOWN;
-    device = eNONE;
+    SbDevice = eNONE;
+
+    SbDevice = eSPACEMOUSE;
 
     return hr;
 }
@@ -557,20 +558,91 @@ HRESULT UpdateDeviceState()
             uint16_t cs2 = ((response[13] & 0x3F) << 6) | (response[14] & 0x3F);
             if (cs == cs2)
             {
-                SbState.tx = (((response[1] & 0x3F) << 6) | (response[2] & 0x3F)) - 2048;
-                SbState.ty = (((response[3] & 0x3F) << 6) | (response[4] & 0x3F)) - 2048;
-                SbState.tz = -((((response[5] & 0x3F) << 6) | (response[6] & 0x3F)) - 2048);
-                SbState.rx = (((response[7] & 0x3F) << 6) | (response[8] & 0x3F)) - 2048;
-                SbState.ry = ((((response[9] & 0x3F) << 6) | (response[10] & 0x3F)) - 2048);
-                SbState.rz = -((((response[11] & 0x3F) << 6) | (response[12] & 0x3F)) - 2048);
+                SbState.tx = 4 * ((((response[1] & 0x3F) << 6) | (response[2] & 0x3F)) - 2048);
+                SbState.ty = 4 * ((((response[3] & 0x3F) << 6) | (response[4] & 0x3F)) - 2048);
+                SbState.tz = 4 * (-((((response[5] & 0x3F) << 6) | (response[6] & 0x3F)) - 2048));
+                SbState.rx = 4 * ((((response[7] & 0x3F) << 6) | (response[8] & 0x3F)) - 2048);
+                SbState.ry = 4 * (((((response[9] & 0x3F) << 6) | (response[10] & 0x3F)) - 2048));
+                SbState.rz = 4 * (-((((response[11] & 0x3F) << 6) | (response[12] & 0x3F)) - 2048));
             }
         }
         else if ((cb > 0) && (response[0] == 'k'))
         {
             SbButtons.buttons = (response[1] & 0x0f) | ((response[2] << 8) & 0xf00) | ((response[3] << 12) & 0xf000);
         }
+        else if ((cb > 0) && (response[0] == 'N'))
+        {
+            nullRegion = response[1] & 0x3f;
+        }
+        else if ((cb > 0) && (response[0] == 'n'))
+        {
+            nullRegion = response[1] & 0x3f;
+        }
+        else if ((cb > 0) && (response[0] == 'F') && (response[1] == 'R'))
+        {
+            rotationSensitivity = response[2] & 0x3f;
+        }
+        else if ((cb > 0) && (response[0] == 'F') && (response[1] == 'T'))
+        {
+            translationSensitivity = response[2] & 0x3f;
+        }
+        else if ((cb > 0) && (response[0] == 'q'))
+        {
+            translationSensitivity = response[2] & 0x0f;
+            rotationSensitivity = response[3] & 0x0f;
+        }
     }
 
     return hr;
 }
 
+HRESULT SetDeviceSensitivity(uint8_t value)
+{
+    char cmd[16];
+
+    if (value >= 64)
+    {
+        return E_INVALIDARG;
+    }
+
+    switch (SbDevice)
+    {
+    case eSPACEMOUSE:
+        // sensitivity <translation> <rotation>
+        wsprintfA(cmd, "q%c%c\r", nibbleValues[value / 4], nibbleValues[value / 4]);
+        return writeCommand(cmd);
+
+    case eSPACEBALL:
+        wsprintfA(cmd, "FB%c\r", value == 0x3F ? '?' : value + '@');
+        return writeCommand(cmd);
+
+    default:
+        return E_NOT_VALID_STATE;
+    }
+}
+
+HRESULT SetNullRadius(uint8_t value)
+{
+    char cmd[16];
+
+    if (value >= 64)
+    {
+        return E_INVALIDARG;
+    }
+
+    switch (SbDevice)
+    {
+    case eSPACEMOUSE:
+        // null radius <value> 0 - 15
+        wsprintfA(cmd, "n%c\r", nibbleValues[value / 4]);
+        return writeCommand(cmd);
+
+    case eSPACEBALL:
+        // null radius <value> 0 - 63
+        wsprintfA(cmd, "N%c\r", value == 0x3F ? '?' : value + '@');
+        return writeCommand(cmd);
+
+    default:
+        return E_NOT_VALID_STATE;
+    }
+}

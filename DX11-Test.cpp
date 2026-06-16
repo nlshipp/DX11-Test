@@ -764,22 +764,42 @@ void Render()
 
     if ((SbButtons.buttons & SB_BTN_1) && !(lastButtons & SB_BTN_1))
     {
-        writeCommand("FBp\r");
+        SetDeviceSensitivity(0x3F);
     }
 
     if ((SbButtons.buttons & SB_BTN_2) && !(lastButtons & SB_BTN_2))
     {
-        writeCommand("FB`\r");
+        SetDeviceSensitivity(0x2A);
     }
 
     if ((SbButtons.buttons & SB_BTN_3) && !(lastButtons & SB_BTN_3))
     {
-        writeCommand("FBP\r");
+        SetDeviceSensitivity(0x15);
     }
 
     if ((SbButtons.buttons & SB_BTN_4) && !(lastButtons & SB_BTN_4))
     {
-        writeCommand("FB@\r");
+        SetDeviceSensitivity(0x00);
+    }
+
+    if ((SbButtons.buttons & SB_BTN_5) && !(lastButtons & SB_BTN_5))
+    {
+        SetNullRadius(0x3F);
+    }
+
+    if ((SbButtons.buttons & SB_BTN_6) && !(lastButtons & SB_BTN_6))
+    {
+        SetNullRadius(0x2A);
+    }
+
+    if ((SbButtons.buttons & SB_BTN_7) && !(lastButtons & SB_BTN_7))
+    {
+        SetNullRadius(0x15);
+    }
+
+    if ((SbButtons.buttons & SB_BTN_8) && !(lastButtons & SB_BTN_8))
+    {
+        SetNullRadius(0x00);
     }
 
     lastButtons = SbButtons.buttons;

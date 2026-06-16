@@ -7,7 +7,8 @@
 HRESULT OpenPort();
 HRESULT ClosePort();
 HRESULT UpdateDeviceState();
-HRESULT writeCommand(const char *);
+HRESULT SetDeviceSensitivity(uint8_t value);
+HRESULT SetNullRadius(uint8_t value);
 
 #pragma pack(push,2)
 struct sbVect
@@ -24,6 +25,14 @@ struct sbButtons
 
 #pragma pack(pop)
 
+enum SB_DEVICE
+{
+    eNONE,
+    eSPACEBALL,
+    eSPACEMOUSE
+};
+
+extern SB_DEVICE SbDevice;
 extern sbVect SbState;
 extern sbButtons SbButtons;
 
@@ -36,3 +45,5 @@ extern sbButtons SbButtons;
 #define SB_BTN_6    0x0200
 #define SB_BTN_7    0x0400
 #define SB_BTN_8    0x0800
+
+
