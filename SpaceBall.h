@@ -29,7 +29,8 @@ enum SB_DEVICE
 {
     eNONE,
     eSPACEBALL,
-    eSPACEMOUSE
+    eSPACEMOUSE,
+    eSPACEORB360
 };
 
 extern SB_DEVICE SbDevice;
