@@ -425,6 +425,7 @@ HRESULT OpenPort()
     head = 0;
     tail = 0;
 #if USE_SPACEORB
+/*
     if (!GetCommModemStatus(hPort, &modemStatus))
     {
         hr = GetLastError();
@@ -432,7 +433,7 @@ HRESULT OpenPort()
 
         return hr;
     }
-
+*/
     if (!EscapeCommFunction(hPort, CLRRTS))
     {
         hr = GetLastError();
@@ -444,14 +445,6 @@ HRESULT OpenPort()
     {
         hr = GetLastError();
         MessageBoxA(g_hWnd, "Error clearing DTR", "SpaceBall", MB_ICONERROR);
-
-        return hr;
-    }
-
-    if (!GetCommModemStatus(hPort, &modemStatus))
-    {
-        hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error retrieving CommModemStatus", "SpaceBall", MB_ICONERROR);
 
         return hr;
     }
@@ -481,32 +474,16 @@ HRESULT OpenPort()
 
     Sleep(200);
 
-    if (!GetCommModemStatus(hPort, &modemStatus))
-    {
-        hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error retrieving CommModemStatus", "SpaceBall", MB_ICONERROR);
-
-        return hr;
-    }
-
-
     if (!EscapeCommFunction(hPort, SETRTS))
     {
         hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error setting CommTimeouts", "SpaceBall", MB_ICONERROR);
-
-        return hr;
-    }
-
-    if (!GetCommModemStatus(hPort, &modemStatus))
-    {
-        hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error retrieving CommModemStatus", "SpaceBall", MB_ICONERROR);
+        MessageBoxA(g_hWnd, "Error setting RTS", "SpaceBall", MB_ICONERROR);
 
         return hr;
     }
 
 #else
+
     Sleep(200);
 
     // clear any stale data on port
@@ -647,35 +624,37 @@ HRESULT UpdateDeviceState()
 
     case eCONFIG_MSG:
 #if USE_SPACEORB
-        if ((cb > 0) && (response[0] == '!') && (configStrings[SbConfigIdx][0] == '?'))
+        if (cb > 0)
         {
-            int offset = 1;
-            static const char key[] = { 0x80 };
-            for (int i = 0; i < (int)(cb - offset); i++)
+            if ((response[0] == '!') && (configStrings[SbConfigIdx][0] == '?'))
             {
-                if (response[i + offset] & key[i % sizeof(key)])
+                int offset = 1;
+                static const char key[] = { 0x80 };
+                for (int i = 0; i < (int)(cb - offset); i++)
                 {
-                    response[i + offset] ^= key[i % sizeof(key)];
+                    if (response[i + offset] & key[i % sizeof(key)])
+                    {
+                        response[i + offset] ^= key[i % sizeof(key)];
+                    }
                 }
+                // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
+
+                SbConfigIdx++;
+                state = eCONFIG;
             }
-            // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
-
-            SbConfigIdx++;
-            state = eCONFIG;
+            else if ((response[0] == 'N') && (configStrings[SbConfigIdx][0] == 'n'))
+            {
+                response[0] |= 0x00;
+                SbConfigIdx++;
+                state = eCONFIG;
+            }
+            else if ((response[0] == 'P') && (configStrings[SbConfigIdx][0] == 'P'))
+            {
+                response[0] |= 0x00;
+                SbConfigIdx++;
+                state = eCONFIG;
+            }
         }
-        else if ((cb > 0) && (response[0] == 'N') && (configStrings[SbConfigIdx][0] == 'n'))
-        {
-            response[0] |= 0x00;
-            SbConfigIdx++;
-            state = eCONFIG;
-        }
-        else if ((cb > 0) && (response[0] == 'P') && (configStrings[SbConfigIdx][0] == 'P'))
-        {
-            response[0] |= 0x00;
-            SbConfigIdx++;
-            state = eCONFIG;
-        }
-
         if (SbConfigIdx == ARRAYSIZE(configStrings))
         {
             state = ePOLL;
@@ -712,141 +691,146 @@ HRESULT UpdateDeviceState()
         break;
 
     case ePOLL:
-        if ((cb > 0) && (response[0] == 0))
+        if (cb > 0)
         {
-            // SpaceOrb360 gives strange response to start with
-            static const char bytes[] = {
-            0x00, 0x00, 0x80, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80,
-            0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80,
-            0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00,
-            0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80,
-            0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80,
-            0x00, 0x80, 0x80, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00,
-            0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x11
-            };
-            if ((cb != 0xE0) || (memcmp(response, bytes, cb) != 0))
+            if (response[0] == 0)
             {
-                error[0] = 1;
+                // SpaceOrb360 gives strange response to start with
+                static const char bytes[] = {
+                0x00, 0x00, 0x80, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80,
+                0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80,
+                0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00,
+                0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80,
+                0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80,
+                0x00, 0x80, 0x80, 0x00, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x00,
+                0x80, 0x00, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x80, 0x00, 0x80, 0x80, 0x80, 0x80, 0x80, 0x00, 0x80, 0x00, 0x80, 0x80, 0x11
+                };
+                if ((cb != 0xE0) || (memcmp(response, bytes, cb) != 0))
+                {
+                    error[0] = 1;
+                }
+                else
+                {
+                    error[0] = 2;
+                }
             }
-            else
+            else if (response[0] == 'R')
             {
-                error[0] = 2;
+                int offset = 1;
+                static const char key[] = { 0x80 };
+                for (int i = 0; i < (int)(cb - offset); i++)
+                {
+                    response[i + offset] ^= key[i % sizeof(key)];
+                }
+                error[0] = 3;
+                // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
             }
-        }
-        else if ((cb > 0) && (response[0] == 'R'))
-        {
-            int offset = 1;
-            static const char key[] = { 0x80 };
-            for (int i = 0; i < (int)(cb - offset); i++)
+            else if ((response[0] == 'D') && SbDevice == eSPACEBALL)
             {
-                response[i + offset] ^= key[i % sizeof(key)];
+                SbState = *(sbVect *)(&response[1]);
+                SbState.rx = _byteswap_ushort(SbState.rx);
+                SbState.ry = _byteswap_ushort(SbState.ry);
+                SbState.rz = _byteswap_ushort(SbState.rz);
+                SbState.tx = _byteswap_ushort(SbState.tx);
+                SbState.ty = _byteswap_ushort(SbState.ty);
+                SbState.tz = _byteswap_ushort(SbState.tz);
             }
-            error[0] = 3;
-            // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
-        }
-        else if ((cb > 0) && (response[0] == 'D') && SbDevice == eSPACEBALL)
-        {
-            SbState = *(sbVect *)(&response[1]);
-            SbState.rx = _byteswap_ushort(SbState.rx);
-            SbState.ry = _byteswap_ushort(SbState.ry);
-            SbState.rz = _byteswap_ushort(SbState.rz);
-            SbState.tx = _byteswap_ushort(SbState.tx);
-            SbState.ty = _byteswap_ushort(SbState.ty);
-            SbState.tz = _byteswap_ushort(SbState.tz);
-        }
-        else if ((cb > 0) && (response[0] == 'D') && SbDevice == eSPACEORB360)
-        {
-            int offset = 1;
-            static const char key[] = "\x00SpaceWare\x00";
-
-            for (int i = 0; i < (int)(cb - offset); i++)
+            else if ((response[0] == 'D') && SbDevice == eSPACEORB360)
             {
-                response[i + offset] ^= key[i % sizeof(key)];
+                int offset = 1;
+                static const char key[] = "\x00SpaceWare\x00";
+
+                for (int i = 0; i < (int)(cb - offset); i++)
+                {
+                    response[i + offset] ^= key[i % sizeof(key)];
+                }
+
+                SbState.tx = (response[2] & 0x40) ? 0xFC00 : 0;
+                SbState.ty = (response[3] & 0x08) ? 0xFC00 : 0;
+                SbState.tz = (response[4] & 0x01) ? 0xFC00 : 0;
+                SbState.rx = (response[6] & 0x10) ? 0xFC00 : 0;
+                SbState.ry = (response[7] & 0x02) ? 0xFC00 : 0;
+                SbState.rz = (response[9] & 0x20) ? 0xFC00 : 0;
+
+                SbState.tx |= ((response[2] & 0x7F) << 3) | ((response[3] & 0x70) >> 4);
+                SbState.ty |= ((response[3] & 0x0F) << 6) | ((response[4] & 0x7E) >> 1);
+                SbState.tz |= ((response[4] & 0x01) << 9) | ((response[5] & 0x7F) << 2) | ((response[6] & 0x60) >> 5);
+                SbState.rx |= ((response[6] & 0x1F) << 5) | ((response[7] & 0x7C) >> 2);
+                SbState.ry |= ((response[7] & 0x03) << 8) | ((response[8] & 0x7F) << 1) | ((response[9] & 0x40) >> 6);
+                SbState.rz |= ((response[9] & 0x3F) << 4) | ((response[10] & 0x78) >> 3);
+
+                SbState.tx *= 2;
+                SbState.ty *= 2;
+                SbState.tz *= -2;
+                SbState.rx *= 2;
+                SbState.ry *= 2;
+                SbState.rz *= -2;
             }
-
-            SbState.tx = (response[2] & 0x40) ? 0xFC00 : 0;
-            SbState.ty = (response[3] & 0x08) ? 0xFC00 : 0;
-            SbState.tz = (response[4] & 0x01) ? 0xFC00 : 0;
-            SbState.rx = (response[6] & 0x10) ? 0xFC00 : 0;
-            SbState.ry = (response[7] & 0x02) ? 0xFC00 : 0;
-            SbState.rz = (response[9] & 0x20) ? 0xFC00 : 0;
-
-            SbState.tx |= ((response[2] & 0x7F) << 3) | ((response[3] & 0x70) >> 4);
-            SbState.ty |= ((response[3] & 0x0F) << 6) | ((response[4] & 0x7E) >> 1);
-            SbState.tz |= ((response[4] & 0x01) << 9) | ((response[5] & 0x7F) << 2) | ((response[6] & 0x60) >> 5);
-            SbState.rx |= ((response[6] & 0x1F) << 5) | ((response[7] & 0x7C) >> 2);
-            SbState.ry |= ((response[7] & 0x03) << 8) | ((response[8] & 0x7F) << 1) | ((response[9] & 0x40) >> 6);
-            SbState.rz |= ((response[9] & 0x3F) << 4) | ((response[10] & 0x78) >> 3);
-
-            SbState.tx *= 2;
-            SbState.ty *= 2;
-            SbState.tz *= -2;
-            SbState.rx *= 2;
-            SbState.ry *= 2;
-            SbState.rz *= -2;
-        }
-        else if ((cb > 0) && (response[0] == 'K') && SbDevice != eSPACEORB360)
-        {
-            SbButtons = *(sbButtons *)(&response[1]);
-            SbButtons.buttons = _byteswap_ushort(SbButtons.buttons);
-        }
-        else if ((cb > 0) && (response[0] == 'K') && SbDevice == eSPACEORB360)
-        {
-            SbButtons.buttons = ((uint16_t)response[2] & 0x0F) | (((uint16_t)response[2] & 0x70) << 4);
-            SbButtons.buttons |= ((uint16_t)response[2] & 0x01) << 12;  // duplicate button A as pick.
-        }
-        else if ((cb > 0) && (response[0] == 'd'))
-        {
-            // compare checksums
-            uint16_t cs = (uint8_t)response[1] + (uint8_t)response[2] + (uint8_t)response[3] + (uint8_t)response[4] +
-                (uint8_t)response[5] + (uint8_t)response[6] + (uint8_t)response[7] + (uint8_t)response[8] +
-                (uint8_t)response[9] + (uint8_t)response[10] + (uint8_t)response[11] + (uint8_t)response[12];
-            uint16_t cs2 = ((response[13] & 0x3F) << 6) | (response[14] & 0x3F);
-            if (cs == cs2)
+            else if ((response[0] == 'K') && SbDevice != eSPACEORB360)
             {
-                SbState.tx = 4 * ((((response[1] & 0x3F) << 6) | (response[2] & 0x3F)) - 2048);
-                SbState.ty = 4 * ((((response[3] & 0x3F) << 6) | (response[4] & 0x3F)) - 2048);
-                SbState.tz = 4 * (-((((response[5] & 0x3F) << 6) | (response[6] & 0x3F)) - 2048));
-                SbState.rx = 4 * ((((response[7] & 0x3F) << 6) | (response[8] & 0x3F)) - 2048);
-                SbState.ry = 4 * (((((response[9] & 0x3F) << 6) | (response[10] & 0x3F)) - 2048));
-                SbState.rz = 4 * (-((((response[11] & 0x3F) << 6) | (response[12] & 0x3F)) - 2048));
+                SbButtons = *(sbButtons *)(&response[1]);
+                SbButtons.buttons = _byteswap_ushort(SbButtons.buttons);
             }
-        }
-        else if ((cb > 0) && (response[0] == 'k'))
-        {
-            SbButtons.buttons = (response[1] & 0x0f) | ((response[2] << 8) & 0xf00) | ((response[3] << 12) & 0xf000);
-        }
-        else if ((cb > 0) && (response[0] == 'N'))
-        {
-            nullRegion = response[1] & 0x3f;
-        }
-        else if ((cb > 0) && (response[0] == 'n'))
-        {
-            nullRegion = response[1] & 0x3f;
-        }
-        else if ((cb > 0) && (response[0] == 'F') && (response[1] == 'R'))
-        {
-            rotationSensitivity = response[2] & 0x3f;
-        }
-        else if ((cb > 0) && (response[0] == 'F') && (response[1] == 'T'))
-        {
-            translationSensitivity = response[2] & 0x3f;
-        }
-        else if ((cb > 0) && (response[0] == 'q'))
-        {
-            translationSensitivity = response[2] & 0x0f;
-            rotationSensitivity = response[3] & 0x0f;
-        }
-        else if ((cb > 0) && (response[0] == 'E'))
-        {
-            // parse error message
-            error[0] = response[0];
-            error[1] = response[1];
-            error[2] = response[2];
-            error[3] = response[3];
-            error[4] = response[4];
+            else if ((response[0] == 'K') && SbDevice == eSPACEORB360)
+            {
+                SbButtons.buttons = ((uint16_t)response[2] & 0x0F) | (((uint16_t)response[2] & 0x70) << 4);
+                SbButtons.buttons |= ((uint16_t)response[2] & 0x01) << 12;  // duplicate button A as pick.
+            }
+            else if (response[0] == 'd')
+            {
+                // compare checksums
+                uint16_t cs = (uint8_t)response[1] + (uint8_t)response[2] + (uint8_t)response[3] + (uint8_t)response[4] +
+                    (uint8_t)response[5] + (uint8_t)response[6] + (uint8_t)response[7] + (uint8_t)response[8] +
+                    (uint8_t)response[9] + (uint8_t)response[10] + (uint8_t)response[11] + (uint8_t)response[12];
+                uint16_t cs2 = ((response[13] & 0x3F) << 6) | (response[14] & 0x3F);
+                if (cs == cs2)
+                {
+                    SbState.tx = 4 * ((((response[1] & 0x3F) << 6) | (response[2] & 0x3F)) - 2048);
+                    SbState.ty = 4 * ((((response[3] & 0x3F) << 6) | (response[4] & 0x3F)) - 2048);
+                    SbState.tz = 4 * (-((((response[5] & 0x3F) << 6) | (response[6] & 0x3F)) - 2048));
+                    SbState.rx = 4 * ((((response[7] & 0x3F) << 6) | (response[8] & 0x3F)) - 2048);
+                    SbState.ry = 4 * (((((response[9] & 0x3F) << 6) | (response[10] & 0x3F)) - 2048));
+                    SbState.rz = 4 * (-((((response[11] & 0x3F) << 6) | (response[12] & 0x3F)) - 2048));
+                }
+            }
+            else if (response[0] == 'k')
+            {
+                SbButtons.buttons = (response[1] & 0x0f) | ((response[2] << 8) & 0xf00) | ((response[3] << 12) & 0xf000);
+            }
+            else if (response[0] == 'N')
+            {
+                nullRegion = response[1] & 0x3f;
+            }
+            else if (response[0] == 'n')
+            {
+                nullRegion = response[1] & 0x3f;
+            }
+            else if ((response[0] == 'F') && (response[1] == 'R'))
+            {
+                // Feel - Rotation
+                rotationSensitivity = response[2] & 0x3f;
+            }
+            else if ((response[0] == 'F') && (response[1] == 'T'))
+            {
+                // Feel - Translation
+                translationSensitivity = response[2] & 0x3f;
+            }
+            else if (response[0] == 'q')
+            {
+                translationSensitivity = response[2] & 0x0f;
+                rotationSensitivity = response[3] & 0x0f;
+            }
+            else if (response[0] == 'E')
+            {
+                // parse error message
+                error[0] = response[0];
+                error[1] = response[1];
+                error[2] = response[2];
+                error[3] = response[3];
+                error[4] = response[4];
 
-            // 0x04 - brownout, 0x02 - checksum, 0x01 - hard fault
+                // 0x04 - brownout, 0x02 - checksum, 0x01 - hard fault
+            }
         }
     }
 
