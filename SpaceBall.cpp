@@ -589,25 +589,28 @@ void EvaluatePacket(DWORD cb, char* packet)
                 response[i + offset] ^= key[i % sizeof(key)];
             }
 
+            // set sign bits
             SbState.tx = (response[2] & 0x40) ? 0xFC00 : 0;
-            SbState.ty = (response[3] & 0x08) ? 0xFC00 : 0;
-            SbState.tz = (response[4] & 0x01) ? 0xFC00 : 0;
+            SbState.tz = (response[3] & 0x08) ? 0xFC00 : 0;     // swap z and y values to account for proper posture of
+            SbState.ty = (response[4] & 0x01) ? 0xFC00 : 0;     // holding SpaceOrb upgright
             SbState.rx = (response[6] & 0x10) ? 0xFC00 : 0;
-            SbState.ry = (response[7] & 0x02) ? 0xFC00 : 0;
-            SbState.rz = (response[9] & 0x20) ? 0xFC00 : 0;
+            SbState.rz = (response[7] & 0x02) ? 0xFC00 : 0;
+            SbState.ry = (response[9] & 0x20) ? 0xFC00 : 0;
 
+            // set values
             SbState.tx |= ((response[2] & 0x7F) << 3) | ((response[3] & 0x70) >> 4);
-            SbState.ty |= ((response[3] & 0x0F) << 6) | ((response[4] & 0x7E) >> 1);
-            SbState.tz |= ((response[4] & 0x01) << 9) | ((response[5] & 0x7F) << 2) | ((response[6] & 0x60) >> 5);
+            SbState.tz |= ((response[3] & 0x0F) << 6) | ((response[4] & 0x7E) >> 1);
+            SbState.ty |= ((response[4] & 0x01) << 9) | ((response[5] & 0x7F) << 2) | ((response[6] & 0x60) >> 5);
             SbState.rx |= ((response[6] & 0x1F) << 5) | ((response[7] & 0x7C) >> 2);
-            SbState.ry |= ((response[7] & 0x03) << 8) | ((response[8] & 0x7F) << 1) | ((response[9] & 0x40) >> 6);
-            SbState.rz |= ((response[9] & 0x3F) << 4) | ((response[10] & 0x78) >> 3);
+            SbState.rz |= ((response[7] & 0x03) << 8) | ((response[8] & 0x7F) << 1) | ((response[9] & 0x40) >> 6);
+            SbState.ry |= ((response[9] & 0x3F) << 4) | ((response[10] & 0x78) >> 3);
 
+            // scale output
             SbState.tx *= 2;
-            SbState.ty *= 2;
+            SbState.ty *= -2;
             SbState.tz *= -2;
             SbState.rx *= 2;
-            SbState.ry *= 2;
+            SbState.ry *= -2;
             SbState.rz *= -2;
         }
         else if (response[0] == 'd')    // SpaceMouse
