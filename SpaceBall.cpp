@@ -55,9 +55,10 @@ const char* modeSwitchString = "c33\r";    // compress mode - translation + rota
 #else
 
 const char* configStrings[] = {
-    "?\r",      // query packet (return model and firmware version)
-    "P\x80\xB0\r",// pulse period 96ms
-    "n\r"      // query null radius
+    "?\r",          // query packet (return model and firmware version)
+    "P\x80\xB0\r",  // pulse period 96ms
+    "n\r",          // query null region
+    "$\r"           // Returns "Ignoredx"  ???
 };
 const char* modeSwitchString = "\r";    // SpaceOrb has no mode switch command
 
@@ -80,6 +81,8 @@ static SB_STATE state = eUNKNOWN;   // Spaceball state
 static char     nullRegion = 0;     // Device null region
 static char     rotationSensitivity = 0;    // Sensitivity
 static char     translationSensitivity = 0;    // Sensitivity
+static uint16_t pulseMin = 0 ;      // pulse timing minimum
+static uint16_t pulseMax = 0;       // pulse timing maximum
 static char     error[5];
 // 
 // Attempt to fill circular buffer with data from serial port
@@ -613,7 +616,7 @@ void EvaluatePacket(DWORD cb, char* packet)
             SbState.ry *= -2;
             SbState.rz *= -2;
         }
-        else if (response[0] == 'd')    // SpaceMouse
+        else if ((response[0] == 'd') && SbDevice == eSPACEMOUSE)    // SpaceMouse
         {
             // compare checksums
             uint16_t cs = (uint8_t)response[1] + (uint8_t)response[2] + (uint8_t)response[3] + (uint8_t)response[4] +
@@ -640,29 +643,37 @@ void EvaluatePacket(DWORD cb, char* packet)
             SbButtons.buttons = ((uint16_t)response[2] & 0x0F) | (((uint16_t)response[2] & 0x70) << 4);
             SbButtons.buttons |= ((uint16_t)response[2] & 0x01) << 12;  // duplicate button A as pick.
         }
-        else if (response[0] == 'k')    // SpaceMouse
+        else if ((response[0] == 'k') && SbDevice == eSPACEMOUSE)
         {
             SbButtons.buttons = (response[1] & 0x0f) | ((response[2] << 8) & 0xf00) | ((response[3] << 12) & 0xf000);
         }
         else if (response[0] == 'R')
         {
+            // SpaceOrb360 Reset packet
+            // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
             int offset = 1;
             static const char key[] = { 0x80 };
             for (int i = 0; i < (int)(cb - offset); i++)
             {
                 response[i + offset] ^= key[i % sizeof(key)];
             }
-            error[0] = 3;
-
-            // SpaceOrb returns:
-            // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
+            error[0] = 0;
         }
         else if (response[0] == 'N')
         {
-            nullRegion = response[1] & 0x3f;
+            // Null region packet
+            if (SbDevice == eSPACEORB360)
+            {
+                nullRegion = response[1] & 0x7f;
+            }
+            else
+            {
+                nullRegion = response[1] & 0x3f;
+            }
         }
         else if (response[0] == 'n')
         {
+            // Null region packet
             nullRegion = response[1] & 0x3f;
         }
         else if ((response[0] == 'F') && (response[1] == 'R'))
@@ -677,6 +688,7 @@ void EvaluatePacket(DWORD cb, char* packet)
         }
         else if (response[0] == 'q')
         {
+            // SpaceMouse sensitivity
             translationSensitivity = response[2] & 0x0f;
             rotationSensitivity = response[3] & 0x0f;
         }
@@ -693,6 +705,9 @@ void EvaluatePacket(DWORD cb, char* packet)
         }
         else if (response[0] == '!')
         {
+            // SpaceOrb360 information packet
+            //  expect something like "!1 Spaceball (R) V4.26 28-Jun-96 Copyright (C) 19968!2 11.52N 0.2557Nm 10bitD"
+
             int offset = 1;
             static const char key[] = { 0x80 };
             for (int i = 0; i < (int)(cb - offset); i++)
@@ -702,12 +717,41 @@ void EvaluatePacket(DWORD cb, char* packet)
                     response[i + offset] ^= key[i % sizeof(key)];
                 }
             }
-            // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
+            error[0] = 3;
+        }
+        else if (response[0] == '$')
+        {
+            // SpaceOrb360 packet ?
+
+            int offset = 1;
+            static const char key[] = { 0x80 };
+            for (int i = 0; i < (int)(cb - offset); i++)
+            {
+                if (response[i + offset] & key[i % sizeof(key)])
+                {
+                    response[i + offset] ^= key[i % sizeof(key)];
+                }
+            }
             error[0] = 3;
         }
         else if (response[0] == 'P')
+        {   
+            // pulse timing
+            if (SbDevice == eSPACEORB360)
+            {
+                pulseMax = response[1] & 0x7F;
+                pulseMin = response[2] & 0x7F;
+            }
+            else
+            {
+                pulseMax = (response[1] & 0x3F) << 6 | (response[2] & 0x3F);
+                pulseMax = (response[3] & 0x3F) << 6 | (response[4] & 0x3F);
+            }
+        }
+        else if (response[0] == 'p')
         {
-            response[0] |= 0x00;
+            pulseMax = response[1] & 0x0F;
+            pulseMin = response[2] & 0x0F;
         }
     }
 }
@@ -784,6 +828,11 @@ HRESULT UpdateDeviceState()
                 state = eCONFIG;
             }
             else if ((response[0] == 'P') && (configStrings[SbConfigIdx][0] == 'P'))
+            {
+                SbConfigIdx++;
+                state = eCONFIG;
+            }
+            else if ((response[0] == '$') && (configStrings[SbConfigIdx][0] == '$'))
             {
                 SbConfigIdx++;
                 state = eCONFIG;
