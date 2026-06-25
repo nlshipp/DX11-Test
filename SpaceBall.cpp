@@ -28,21 +28,19 @@ uint16_t SbConfigIdx = 0;
 sbButtons SbButtons = { 0 };
 SB_DEVICE SbDevice = eNONE;
 
-#if USE_SPACEBALL
-
-const char* resetString = "@RESET\r";
-const char* configStrings[] = {
+// Spaceball config strings
+const char const * sbResetString = "@RESET\r";
+const char const * sbConfigStrings[] = {
     "CBT\r",    // Communication Binary mode + 20 tenths of a second x-on timeout- 0x54 (T) & 0x3f = 20
     "P@r@r\r",  // Pulse data/request packets maxpulse,minpulse = 50ms, 50ms - 0x40 (@) 0x72 (r) & 0x3f 0x3f
     "NT\r",     // Null region size- 0x54 (T) & 0x3f = 0x14 ?@A..Z[\]^_`a..z{|} 0x3f..0x7e
     "FBp\r",    // Feel [T|F|Both]p = 0x70 (p) & 0x3F = 0x30 ?@A..Z[\]^_`a..z{|} 0x3f..0x7e
     "L+\r"      // button click noise
 };
-const char* modeSwitchString = "MSSV\r";    // translation and rotation streaming mode
+const char const * sbModeSwitchString = "MSSV\r";    // translation and rotation streaming mode
 
-#elif USE_SPACEMOUSE
-
-const char* configStrings[] = {
+// SpaceMouse config strings
+const char const * smConfigStrings[] = {
     "c00\r",    // compress mode
     "m3\r",     // mode - translation + rotation
     "pAA\r",    // pulse period 40ms min, 40ms max
@@ -50,21 +48,21 @@ const char* configStrings[] = {
     "nH\r",     // null radius = 8
     "l000\r"    // turn off LEDs
 };
-const char* modeSwitchString = "c33\r";    // compress mode - translation + rotation, ext key + compress
+const char const * smModeSwitchString = "c33\r";    // compress mode - translation + rotation, ext key + compress
 
-#else
+// SpaceOrb360 config strings
 
-const char* configStrings[] = {
+const char const * soConfigStrings[] = {
     "?\r",          // query packet (return model and firmware version)
     "P\x80\xB0\r",  // pulse period 96ms
     "n\r",          // query null region
     "$\r"           // Returns "Ignoredx"  ???
 };
-const char* modeSwitchString = "\r";    // SpaceOrb has no mode switch command
+const char const * soModeSwitchString = nullptr;    // SpaceOrb has no mode switch command
 
-#endif
-
-const char  nibbleValues[] = {
+// SpaceMouse nibble values - all have an even number of bits set
+//   0, A, B, 3, D, 5, 6, G, H, 9, :, K, <, M, N, ?
+const char  smNibbleValues[] = {
     0x30, 0x41, 0x42, 0x33, 0x44, 0x35, 0x36, 0x47, 0x48, 0x39, 0x3A, 0x4B, 0x3C, 0x4D, 0x4E, 0x3F
 };
 
@@ -78,14 +76,20 @@ static DWORD    head, tail;         // head is writer index, tail is reader inde
 char            response[BUFSIZE * 2];
 
 static SB_STATE state = eUNKNOWN;   // Spaceball state
+
+static uint16_t configStringsCount = 0;
+static const char const * * configStrings = nullptr;
+static const char * modeSwitchString = nullptr;
+
 static char     nullRegion = 0;     // Device null region
 static char     rotationSensitivity = 0;    // Sensitivity
 static char     translationSensitivity = 0;    // Sensitivity
 static uint16_t pulseMin = 0 ;      // pulse timing minimum
 static uint16_t pulseMax = 0;       // pulse timing maximum
 static char     error[5];
+
 // 
-// Attempt to fill circular buffer with data from serial port
+// Fill circular buffer with data from serial port
 //   When head == tail, buffer is empty.
 //   When head+1 == tail (modulo buf size), buffer is full.
 //
@@ -106,7 +110,6 @@ HRESULT readBuffer()
     // Read can't overflow buffer
     if ((head + space) < sizeof(buf))
     {
-//        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
         if (!ReadFile(hPort, buf + head, space, &cb, nullptr))
         {
             hr = GetLastError();
@@ -120,7 +123,6 @@ HRESULT readBuffer()
     }
     else // Two reads required to fill buffer
     {
-//        if (!ReadFile(hPort, buf + head, 1, &cb, nullptr))
         if (!ReadFile(hPort, buf + head, sizeof(buf) - head, &cb, nullptr))
         {
             hr = GetLastError();
@@ -157,8 +159,6 @@ HRESULT readBuffer()
     return hr;
 }
 
-#if USE_SPACEBALL
-// escape X-ON, X-OFF and CR values
 HRESULT readUntilCr(char *output, DWORD *count)
 {
     static BOOL escape = FALSE;
@@ -173,8 +173,10 @@ HRESULT readUntilCr(char *output, DWORD *count)
 
     while (tail != head)
     {
-        if (buf[tail] != '\r' && buf[tail] != '^' && buf[tail] != '\n')
+        // copy normal characters to output buffer
+        if (buf[tail] != '\r' && buf[tail] != '\n' && !((SbDevice == eSPACEBALL) && (buf[tail] == '^')))
         {
+            // unescape X-ON, X-OFF and CR values for Spaceball devices
             if (escape && buf[tail] == 'S')
             {
                 output[*count] = 19;
@@ -192,21 +194,28 @@ HRESULT readUntilCr(char *output, DWORD *count)
                 output[*count] = buf[tail];
             }
             (*count)++;
-            escape = false;
+            escape = FALSE;
         }
 
+        // end of input, break out now
         if (buf[tail] == '\r')
+        {
+            output[*count] = 0;
+            escape = FALSE;
             break;
+        }
 
+        // don't suppress newline characters if not preceeded by carriage return
         if (buf[tail] == '\n' && lastChar != '\r')
         {
             output[*count] = '\n';
             (*count)++;
-            escape = false;
+            escape = FALSE;
         }
 
-        if (buf[tail] == '^')
+        if ((SbDevice == eSPACEBALL) && (buf[tail] == '^'))
         {
+            // next value is escaped for for Spaceball devices
             if (escape)
             {
                 output[*count] = '^';
@@ -236,56 +245,41 @@ HRESULT readUntilCr(char *output, DWORD *count)
 
     return 0;
 }
-#else
-// No escaping, binary stream
-HRESULT readUntilCr(char *output, DWORD *count)
+
+HRESULT readPort(char *output, DWORD *count)
 {
-    static BOOL escape = FALSE;
-    static char lastChar = '\r';
+    HRESULT hr;
+    DWORD index = 0;
+
     *count = 0;
 
-    if (tail == head)
+    do
     {
-        // empty buffer
-        return -1;
-    }
-
-    while (tail != head)
-    {
-        if (buf[tail] != '\r' && buf[tail] != '\n')
+        if (*count > 480)   // fill up to 480 bytes of 512 byte response
         {
-            output[*count] = buf[tail];
-            (*count)++;
+            *count = 0;
+            return hr;
         }
-
-        if (buf[tail] == '\r')
+        hr = readUntilCr(output + *count, &index);
+        *count += index;
+        if (hr == 0)
+        {
             break;
-
-        if (buf[tail] == '\n' && lastChar != '\r')
-        {
-            output[*count] = '\n';
-            (*count)++;
-            escape = false;
         }
 
-        lastChar = buf[tail];
-        tail = (tail + 1) % sizeof(buf);
-    }
+        if (hr == -1)
+        {
+            hr = readBuffer();
+        }
 
-    if (tail != head)
-    {
-        // consume last CR.
-        tail = (tail + 1) % sizeof(buf);
-    }
-    else
-    {
-        // no CR in buffer
-        return -1;
-    }
+        if (hr != 0)
+        {
+            break;
+        }
+    } while (*count > 0);
 
-    return 0;
+    return hr;
 }
-#endif
 
 HRESULT writeCommand(const char *commandString)
 {
@@ -309,6 +303,53 @@ HRESULT writeCommand(const char *commandString)
     return hr;
 }
 
+// Detect device based on response to SpaceMouse query sensitivity command - qQ
+//   SpaceMouse will return q<nibble1><nibble2>
+//   Spaceball will return ?qQ - invalid command
+//   SpaceOrb360 will return ?q<xor>?Q<xor> - invalid command
+HRESULT detectDevice()
+{
+    HRESULT hr = E_FAIL;
+    DWORD cb;
+
+    hr = writeCommand("qQ\r");
+
+    do
+    {
+        hr = readPort(response, &cb);
+        if (FAILED(hr))
+        {
+            return hr;
+        }
+
+        if (cb > 0)
+        {
+            if ((cb == 3) && (0 == strncmp("?qQ", response, 3)))
+            {
+                SbDevice = eSPACEBALL;
+                configStrings = sbConfigStrings;
+                configStringsCount = ARRAYSIZE(sbConfigStrings);
+                modeSwitchString = sbModeSwitchString;
+            }
+            else if ((cb == 3) && ('q' == response[0]))
+            {
+                SbDevice = eSPACEMOUSE;
+                configStrings = smConfigStrings;
+                configStringsCount = ARRAYSIZE(smConfigStrings);
+                modeSwitchString = smModeSwitchString;
+            }
+            else if ((cb >= 3) && ('?' == response[0]) && (('q' | 0x80) == response[1]))
+            {
+                SbDevice = eSPACEORB360;
+                configStrings = soConfigStrings;
+                configStringsCount = ARRAYSIZE(soConfigStrings);
+                modeSwitchString = soModeSwitchString;
+            }
+        }
+    } while (SbDevice == eNONE);
+
+    return S_OK;
+}
 
 HRESULT OpenPort()
 {
@@ -359,8 +400,8 @@ HRESULT OpenPort()
     portState.fRtsControl = RTS_CONTROL_ENABLE;
     portState.fDsrSensitivity = FALSE;
 
-    // use CTS handshaking
-    portState.fOutxCtsFlow = TRUE;
+    // no handshaking to begin with
+    portState.fOutxCtsFlow = FALSE;
     portState.fOutxDsrFlow = FALSE;
     portState.fInX = FALSE;
     portState.fOutX = FALSE;
@@ -368,27 +409,6 @@ HRESULT OpenPort()
     portState.XoffChar = 19;
     portState.XonChar = 17;
 
-#if USE_SPACEBALL
-    // use X-ON/OFF handshaking
-    portState.fOutxCtsFlow = FALSE;
-    portState.fOutxDsrFlow = FALSE;
-    portState.fInX = TRUE;
-    portState.fOutX = TRUE;
-
-//    portState.StopBits = TWOSTOPBITS;
-#elif USE_SPACEORB
-    // no handshaking
-    portState.fOutxCtsFlow = FALSE;
-    portState.fOutxDsrFlow = FALSE;
-    portState.fInX = FALSE;
-    portState.fOutX = FALSE;
-#else
-    // use CTS handshaking
-    portState.fOutxCtsFlow = TRUE;
-    portState.fOutxDsrFlow = FALSE;
-    portState.fInX = FALSE;
-    portState.fOutX = FALSE;
-#endif
     if (!SetCommState(hPort, &portState))
     {
         hr = GetLastError();
@@ -406,12 +426,6 @@ HRESULT OpenPort()
         return hr;
     }
 
-/*
-    // blocking reads
-    timeouts.ReadIntervalTimeout = 50;
-    timeouts.ReadTotalTimeoutMultiplier = 1;
-    timeouts.ReadTotalTimeoutConstant = 200;
-*/
     // non-blocking reads
     timeouts.ReadIntervalTimeout = MAXDWORD;
     timeouts.ReadTotalTimeoutConstant = 0;
@@ -427,32 +441,17 @@ HRESULT OpenPort()
 
     head = 0;
     tail = 0;
-#if USE_SPACEORB
-/*
-    if (!GetCommModemStatus(hPort, &modemStatus))
-    {
-        hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error retrieving CommModemStatus", "SpaceBall", MB_ICONERROR);
 
-        return hr;
-    }
-*/
-    if (!EscapeCommFunction(hPort, CLRRTS))
+    // clear RTS and DTR
+    if (!EscapeCommFunction(hPort, CLRRTS | CLRDTR))
     {
         hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error clearing RTS", "SpaceBall", MB_ICONERROR);
-
-        return hr;
-    }
-    if (!EscapeCommFunction(hPort, CLRDTR))
-    {
-        hr = GetLastError();
-        MessageBoxA(g_hWnd, "Error clearing DTR", "SpaceBall", MB_ICONERROR);
+        MessageBoxA(g_hWnd, "Error clearing RTS and DTR", "SpaceBall", MB_ICONERROR);
 
         return hr;
     }
 
-    Sleep(1000);
+    Sleep(200);
 
     // clear any stale data on port
     do
@@ -485,35 +484,59 @@ HRESULT OpenPort()
         return hr;
     }
 
-#else
-
-    Sleep(200);
-
-    // clear any stale data on port
-    do
-    {
-        head = 0;
-        tail = 0;
-
-        readBuffer();
-
-    } while (tail != head);
-
-#endif
-
     head = 0;
     tail = 0;
 
     state = eUNKNOWN;
     SbDevice = eNONE;
 
-#if USE_SPACEBALL
-    SbDevice = eSPACEBALL;
-#elif USE_SPACEORB
-    SbDevice = eSPACEORB360;
-#else
-    SbDevice = eSPACEMOUSE;
-#endif
+    // autodetect attached device
+    hr = detectDevice();
+    if (SUCCEEDED(hr))
+    {
+        switch (SbDevice)
+        {
+        case eSPACEBALL:
+            // use X-ON/OFF handshaking
+            portState.fOutxCtsFlow = FALSE;
+            portState.fOutxDsrFlow = FALSE;
+            portState.fInX = TRUE;
+            portState.fOutX = TRUE;
+
+            configStrings = sbConfigStrings;
+            configStringsCount = ARRAYSIZE(sbConfigStrings);
+            break;
+
+        case eSPACEMOUSE:
+            // use CTS handshaking
+            portState.fOutxCtsFlow = TRUE;
+            portState.fOutxDsrFlow = FALSE;
+            portState.fInX = FALSE;
+            portState.fOutX = FALSE;
+
+            configStrings = smConfigStrings;
+            configStringsCount = ARRAYSIZE(smConfigStrings);
+            break;
+
+        case eSPACEORB360:
+            // no handshaking
+            portState.fOutxCtsFlow = FALSE;
+            portState.fOutxDsrFlow = FALSE;
+            portState.fInX = FALSE;
+            portState.fOutX = FALSE;
+
+            configStrings = soConfigStrings;
+            configStringsCount = ARRAYSIZE(soConfigStrings);
+            break;
+
+        default:
+            configStrings = nullptr;
+            configStringsCount = 0;
+            break;
+        }
+
+        hr = SetCommState(hPort, &portState);
+    }
 
     return hr;
 }
@@ -529,41 +552,6 @@ HRESULT ClosePort()
 
         return hr;
     }
-
-    return hr;
-}
-
-HRESULT ReadPort(char *output, DWORD *count)
-{
-    HRESULT hr;
-    DWORD index = 0;
-
-    *count = 0;
-
-    do 
-    {
-        if (*count > 480)   // fill up to 480 bytes of 512 byte response
-        {
-            *count = 0;
-            return hr;
-        }
-        hr = readUntilCr(output + *count, &index);
-        *count += index;
-        if (hr == 0)
-        {
-            break;
-        }
-
-        if (hr == -1)
-        {
-            hr = readBuffer();
-        }
-
-        if (hr != 0)
-        {
-            break;
-        }
-    } while (*count > 0);
 
     return hr;
 }
@@ -703,37 +691,6 @@ void EvaluatePacket(DWORD cb, char* packet)
 
             // 0x04 - brownout, 0x02 - checksum, 0x01 - hard fault
         }
-        else if (response[0] == '!')
-        {
-            // SpaceOrb360 information packet
-            //  expect something like "!1 Spaceball (R) V4.26 28-Jun-96 Copyright (C) 19968!2 11.52N 0.2557Nm 10bitD"
-
-            int offset = 1;
-            static const char key[] = { 0x80 };
-            for (int i = 0; i < (int)(cb - offset); i++)
-            {
-                if (response[i + offset] & key[i % sizeof(key)])
-                {
-                    response[i + offset] ^= key[i % sizeof(key)];
-                }
-            }
-            error[0] = 3;
-        }
-        else if (response[0] == '$')
-        {
-            // SpaceOrb360 packet ?
-
-            int offset = 1;
-            static const char key[] = { 0x80 };
-            for (int i = 0; i < (int)(cb - offset); i++)
-            {
-                if (response[i + offset] & key[i % sizeof(key)])
-                {
-                    response[i + offset] ^= key[i % sizeof(key)];
-                }
-            }
-            error[0] = 3;
-        }
         else if (response[0] == 'P')
         {   
             // pulse timing
@@ -753,6 +710,53 @@ void EvaluatePacket(DWORD cb, char* packet)
             pulseMax = response[1] & 0x0F;
             pulseMin = response[2] & 0x0F;
         }
+        else if (response[0] == '!')
+        {
+            // SpaceOrb360 information packet
+            //  expect something like "!1 Spaceball (R) V4.26 28-Jun-96 Copyright (C) 19968!2 11.52N 0.2557Nm 10bitD"
+
+            int offset = 1;
+            static const char key[] = { 0x80 };
+            for (int i = 0; i < (int)(cb - offset); i++)
+            {
+                if (response[i + offset] & key[i % sizeof(key)])
+                {
+                    response[i + offset] ^= key[i % sizeof(key)];
+                }
+            }
+            error[0] = 3;
+        }
+        else if (response[0] == '$')
+        {
+            // SpaceOrb360 packet
+            // returns "Ignoredx"
+
+            int offset = 1;
+            static const char key[] = { 0x80 };
+            for (int i = 0; i < (int)(cb - offset); i++)
+            {
+                if (response[i + offset] & key[i % sizeof(key)])
+                {
+                    response[i + offset] ^= key[i % sizeof(key)];
+                }
+            }
+            error[0] = 3;
+        }
+        else if (response[0] == '?')
+        {
+            // SpaceOrb360 packet
+            // invalid command packet - returns ?<char><xor> with high bit set on char.
+            int offset = 1;
+            static const char key[] = { 0x80 };
+            for (int i = 0; i < (int)(cb - offset); i++)
+            {
+                if (response[i + offset] & key[i % sizeof(key)])
+                {
+                    response[i + offset] ^= key[i % sizeof(key)];
+                }
+            }
+            error[0] = 3;
+        }
     }
 }
 
@@ -761,10 +765,16 @@ HRESULT UpdateDeviceState()
     HRESULT hr = S_OK;
     DWORD cb = 0;
 
+    if (SbDevice == eNONE)
+    {
+        // no device detected, return no error.
+        return hr;
+    }
+
     // Expect the occasional response, poll the device
     if (state != eUNKNOWN)
     {
-        hr = ReadPort(response, &cb);
+        hr = readPort(response, &cb);
         if (FAILED(hr))
         {
             return hr;
@@ -804,7 +814,7 @@ HRESULT UpdateDeviceState()
         break;
 #endif
     case eCONFIG:
-        assert(SbConfigIdx < ARRAYSIZE(configStrings));
+        assert(SbConfigIdx < configStringsCount);
 
         hr = writeCommand(configStrings[SbConfigIdx]);
         if (SUCCEEDED(hr))
@@ -814,52 +824,61 @@ HRESULT UpdateDeviceState()
         break;
 
     case eCONFIG_MSG:
-#if USE_SPACEORB
+
         if (cb > 0)
         {
-            if ((response[0] == '!') && (configStrings[SbConfigIdx][0] == '?'))
+            switch (SbDevice)
             {
-                SbConfigIdx++;
-                state = eCONFIG;
-            }
-            else if ((response[0] == 'N') && (configStrings[SbConfigIdx][0] == 'n'))
-            {
-                SbConfigIdx++;
-                state = eCONFIG;
-            }
-            else if ((response[0] == 'P') && (configStrings[SbConfigIdx][0] == 'P'))
-            {
-                SbConfigIdx++;
-                state = eCONFIG;
-            }
-            else if ((response[0] == '$') && (configStrings[SbConfigIdx][0] == '$'))
-            {
-                SbConfigIdx++;
-                state = eCONFIG;
+            case eSPACEORB360:
+                if ((response[0] == '!') && (configStrings[SbConfigIdx][0] == '?'))
+                {
+                    SbConfigIdx++;
+                    state = eCONFIG;
+                }
+                else if ((response[0] == 'N') && (configStrings[SbConfigIdx][0] == 'n'))
+                {
+                    SbConfigIdx++;
+                    state = eCONFIG;
+                }
+                else if ((response[0] == 'P') && (configStrings[SbConfigIdx][0] == 'P'))
+                {
+                    SbConfigIdx++;
+                    state = eCONFIG;
+                }
+                else if ((response[0] == '$') && (configStrings[SbConfigIdx][0] == '$'))
+                {
+                    SbConfigIdx++;
+                    state = eCONFIG;
+                }
+                break;
+
+            case eSPACEMOUSE:
+            case eSPACEBALL:
+            default:
+                if (response[0] == configStrings[SbConfigIdx][0])
+                {
+                    SbConfigIdx++;
+                    state = eCONFIG;
+                }
+                break;
             }
 
             EvaluatePacket(cb, response);
-        }
-        if (SbConfigIdx == ARRAYSIZE(configStrings))
-        {
-            state = ePOLL;
-        }
-#else
-        if ((cb > 0) && (response[0] == configStrings[SbConfigIdx][0]))
-        {
-            SbConfigIdx++;
-            if (SbConfigIdx < ARRAYSIZE(configStrings))
-            {
-                state = eCONFIG;
-            }
-            else
-            {
-                state = eMODESWITCH;
-            }
 
-            EvaluatePacket(cb, response);
+            // proceed to mode switch command if present, otherwise start polling.
+            if (SbConfigIdx == configStringsCount)
+            {
+                if (modeSwitchString != nullptr)
+                {
+                    state = eMODESWITCH;
+                }
+                else
+                {
+                    state = ePOLL;
+                }
+            }
         }
-#endif
+
         break;
 
     case eMODESWITCH:
@@ -899,7 +918,7 @@ HRESULT SetDeviceSensitivity(uint8_t value)
     {
     case eSPACEMOUSE:
         // sensitivity <translation> <rotation>
-        wsprintfA(cmd, "q%c%c\r", nibbleValues[value / 4], nibbleValues[value / 4]);
+        wsprintfA(cmd, "q%c%c\r", smNibbleValues[value / 4], smNibbleValues[value / 4]);
         return writeCommand(cmd);
 
     case eSPACEBALL:
@@ -924,7 +943,7 @@ HRESULT SetNullRadius(uint8_t value)
     {
     case eSPACEMOUSE:
         // null radius <value> 0 - 15
-        wsprintfA(cmd, "n%c\r", nibbleValues[value / 4]);
+        wsprintfA(cmd, "n%c\r", smNibbleValues[value / 4]);
         return writeCommand(cmd);
 
     case eSPACEBALL:
