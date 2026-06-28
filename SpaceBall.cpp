@@ -29,18 +29,18 @@ sbButtons SbButtons = { 0 };
 SB_DEVICE SbDevice = eNONE;
 
 // Spaceball config strings
-const char const * sbResetString = "@RESET\r";
-const char const * sbConfigStrings[] = {
+const char * const sbResetString = "@RESET\r";
+const char * const sbConfigStrings[] = {
     "CBT\r",    // Communication Binary mode + 20 tenths of a second x-on timeout- 0x54 (T) & 0x3f = 20
     "P@r@r\r",  // Pulse data/request packets maxpulse,minpulse = 50ms, 50ms - 0x40 (@) 0x72 (r) & 0x3f 0x3f
     "NT\r",     // Null region size- 0x54 (T) & 0x3f = 0x14 ?@A..Z[\]^_`a..z{|} 0x3f..0x7e
     "FBp\r",    // Feel [T|F|Both]p = 0x70 (p) & 0x3F = 0x30 ?@A..Z[\]^_`a..z{|} 0x3f..0x7e
     "L+\r"      // button click noise
 };
-const char const * sbModeSwitchString = "MSSV\r";    // translation and rotation streaming mode
+const char * const sbModeSwitchString = "MSSV\r";    // translation and rotation streaming mode
 
 // SpaceMouse config strings
-const char const * smConfigStrings[] = {
+const char * const smConfigStrings[] = {
     "c00\r",    // compress mode
     "m3\r",     // mode - translation + rotation
     "pAA\r",    // pulse period 40ms min, 40ms max
@@ -48,21 +48,21 @@ const char const * smConfigStrings[] = {
     "nH\r",     // null radius = 8
     "l000\r"    // turn off LEDs
 };
-const char const * smModeSwitchString = "c33\r";    // compress mode - translation + rotation, ext key + compress
+const char * const smModeSwitchString = "c33\r";    // compress mode - translation + rotation, ext key + compress
 
 // SpaceOrb360 config strings
 
-const char const * soConfigStrings[] = {
+const char * const soConfigStrings[] = {
     "?\r",          // query packet (return model and firmware version)
     "P\x80\xB0\r",  // pulse period 96ms
     "n\r",          // query null region
     "$\r"           // Returns "Ignoredx"  ???
 };
-const char const * soModeSwitchString = nullptr;    // SpaceOrb has no mode switch command
+const char * const soModeSwitchString = nullptr;    // SpaceOrb has no mode switch command
 
 // SpaceMouse nibble values - all have an even number of bits set
 //   0, A, B, 3, D, 5, 6, G, H, 9, :, K, <, M, N, ?
-const char  smNibbleValues[] = {
+const char smNibbleValues[] = {
     0x30, 0x41, 0x42, 0x33, 0x44, 0x35, 0x36, 0x47, 0x48, 0x39, 0x3A, 0x4B, 0x3C, 0x4D, 0x4E, 0x3F
 };
 
@@ -78,7 +78,7 @@ char            response[BUFSIZE * 2];
 static SB_STATE state = eUNKNOWN;   // Spaceball state
 
 static uint16_t configStringsCount = 0;
-static const char const * * configStrings = nullptr;
+static const char * const * configStrings = nullptr;
 static const char * modeSwitchString = nullptr;
 
 static char     nullRegion = 0;     // Device null region
@@ -338,7 +338,7 @@ HRESULT detectDevice()
                 configStringsCount = ARRAYSIZE(smConfigStrings);
                 modeSwitchString = smModeSwitchString;
             }
-            else if ((cb >= 3) && ('?' == response[0]) && (('q' | 0x80) == response[1]))
+            else if ((cb >= 3) && ('?' == response[0]) && ((char)0xF1 == response[1]))
             {
                 SbDevice = eSPACEORB360;
                 configStrings = soConfigStrings;
@@ -351,12 +351,16 @@ HRESULT detectDevice()
     return S_OK;
 }
 
-HRESULT OpenPort()
+HRESULT OpenPort(LPCWSTR port)
 {
 //    LPCWSTR port = L"\\\\.\\COM15";
-    LPCWSTR port = L"\\\\.\\COM37";
     HRESULT hr = S_OK;
     DWORD   modemStatus = 0;
+
+    if (!port || (0 == wcslen(port)))
+    {
+        port = L"\\\\.\\COM37";
+    }
 
     hPort = CreateFile(port, GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0, NULL);
     if (hPort == INVALID_HANDLE_VALUE)
@@ -483,6 +487,8 @@ HRESULT OpenPort()
 
         return hr;
     }
+
+    Sleep(200);
 
     head = 0;
     tail = 0;
@@ -640,7 +646,7 @@ void EvaluatePacket(DWORD cb, char* packet)
             // SpaceOrb360 Reset packet
             // 33 byte packet "R Spaceball (R) V4.26 28-Jun-96 Copyright (C) 1996"
             int offset = 1;
-            static const char key[] = { 0x80 };
+            static const char key[] = { (char)0x80 };
             for (int i = 0; i < (int)(cb - offset); i++)
             {
                 response[i + offset] ^= key[i % sizeof(key)];
@@ -716,7 +722,7 @@ void EvaluatePacket(DWORD cb, char* packet)
             //  expect something like "!1 Spaceball (R) V4.26 28-Jun-96 Copyright (C) 19968!2 11.52N 0.2557Nm 10bitD"
 
             int offset = 1;
-            static const char key[] = { 0x80 };
+            static const char key[] = { (char)0x80 };
             for (int i = 0; i < (int)(cb - offset); i++)
             {
                 if (response[i + offset] & key[i % sizeof(key)])
@@ -732,7 +738,7 @@ void EvaluatePacket(DWORD cb, char* packet)
             // returns "Ignoredx"
 
             int offset = 1;
-            static const char key[] = { 0x80 };
+            static const char key[] = { (char)0x80 };
             for (int i = 0; i < (int)(cb - offset); i++)
             {
                 if (response[i + offset] & key[i % sizeof(key)])
@@ -747,7 +753,7 @@ void EvaluatePacket(DWORD cb, char* packet)
             // SpaceOrb360 packet
             // invalid command packet - returns ?<char><xor> with high bit set on char.
             int offset = 1;
-            static const char key[] = { 0x80 };
+            static const char key[] = { (char)0x80 };
             for (int i = 0; i < (int)(cb - offset); i++)
             {
                 if (response[i + offset] & key[i % sizeof(key)])

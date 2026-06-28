@@ -3,6 +3,8 @@
 
 #include "stdafx.h"
 #include "DX11-Test.h"
+#include <stdio.h>
+#include <winerror.h>
 
 using namespace DirectX;
 
@@ -28,6 +30,7 @@ struct ConstantBuffer
 HINSTANCE hInst;                                // current instance
 HWND      g_hWnd = nullptr;
 
+//D3D_DRIVER_TYPE     g_driverType = D3D_DRIVER_TYPE_WARP;
 D3D_DRIVER_TYPE     g_driverType = D3D_DRIVER_TYPE_HARDWARE;
 D3D_FEATURE_LEVEL   g_d3dFeatureLevel;
 
@@ -83,6 +86,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
     LoadStringW(hInstance, IDC_DX11TEST, szWindowClass, MAX_LOADSTRING);
     MyRegisterClass(hInstance);
 
+    printf("hello world\n");
+
     // Perform application initialization:
     if (!InitInstance (hInstance, nCmdShow))
     {
@@ -96,7 +101,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
         return FALSE;
     }
 
-    OpenPort();
+    OpenPort(lpCmdLine);
 
     HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_DX11TEST));
 
@@ -185,7 +190,8 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
    if (!g_hWnd)
    {
-      return FALSE;
+       printf("CreateWindow failed\n");
+       return FALSE;
    }
 
    ShowWindow(g_hWnd, nCmdShow);
@@ -196,6 +202,7 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 
 BOOL InitDevice()
 {
+    HRESULT hr;
     RECT rect;
     GetClientRect(g_hWnd, &rect);
 
@@ -212,7 +219,7 @@ BOOL InitDevice()
     sd.BufferDesc.Width = rect.right- rect.left;
     sd.BufferDesc.Height = rect.bottom - rect.top;
     sd.BufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-    sd.BufferDesc.RefreshRate.Numerator = 60;
+    sd.BufferDesc.RefreshRate.Numerator = 0;
     sd.BufferDesc.RefreshRate.Denominator = 1;
     sd.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sd.OutputWindow = g_hWnd;
@@ -220,9 +227,19 @@ BOOL InitDevice()
     sd.SampleDesc.Quality = 0;
     sd.Windowed = TRUE;
 
-    if (FAILED(D3D11CreateDeviceAndSwapChain(nullptr, g_driverType, nullptr, 0, featureLevels, numFeatureLevels,
+    if (FAILED(hr = D3D11CreateDeviceAndSwapChain(nullptr, g_driverType, nullptr, 0 /* D3D11_CREATE_DEVICE_DEBUG */, /* nullptr, 0, */ featureLevels, numFeatureLevels,
         D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &g_d3dFeatureLevel, &g_pd3dDeviceContext)))
     {
+        printf("CreateDeviceAndSwapChain failed %08x\n", hr);
+        if (hr == E_INVALIDARG)
+            printf("E_INVALIDARG\n");
+
+        if (hr == DXGI_ERROR_SDK_COMPONENT_MISSING)
+            printf("DXGI_ERROR_SDK_COMPONENT_MISSING\n");
+
+        if (hr == DXGI_ERROR_UNSUPPORTED)
+            printf("DXGI_ERROR_UNSUPPORTED\n");
+
         return FALSE;
     }
 
@@ -231,10 +248,10 @@ BOOL InitDevice()
     ID3D11Texture2D * pBackBuffer = nullptr;
     if (FAILED(g_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (LPVOID *)&pBackBuffer)))
     {
+        printf("GetBuffer failed\n");
         return FALSE;
     }
 
-    HRESULT hr;
     hr = g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_pRenderTargetView);
     pBackBuffer->Release();
     if (FAILED(hr))
@@ -267,8 +284,10 @@ BOOL InitDevice()
         dwShaderFlags, 0, &pVertexShaderBlob, &pErrorBlob);
     if (FAILED(hr))
     {
+        printf("CompileFromFile failed\n");
         if (pErrorBlob)
         {
+            printf("CreateDeviceAndSwapChain failed - %s\n", (char *)pErrorBlob->GetBufferPointer());
             OutputDebugStringA((char *)pErrorBlob->GetBufferPointer());
         }
     }
@@ -287,6 +306,7 @@ BOOL InitDevice()
     hr = g_pd3dDevice->CreateVertexShader(pVertexShaderBlob->GetBufferPointer(), pVertexShaderBlob->GetBufferSize(), nullptr, &g_pVertexShader);
     if (FAILED(hr))
     {
+        printf("CreateVertexShader failed\n");
         pVertexShaderBlob->Release();
         return hr;
     }
@@ -306,6 +326,7 @@ BOOL InitDevice()
 
     if (FAILED(hr))
     {
+        printf("CreateInputLayout failed\n");
         return FALSE;
     }
 
@@ -321,8 +342,10 @@ BOOL InitDevice()
         dwShaderFlags, 0, &pPixelShaderBlob, &pErrorBlob);
     if (FAILED(hr))
     {
+        printf("CompileFromFile2 failed\n");
         if (pErrorBlob)
         {
+            printf("CompileFromFile2 failed - %s\n", (char *)pErrorBlob->GetBufferPointer());
             OutputDebugStringA((char *)pErrorBlob->GetBufferPointer());
         }
     }
@@ -342,6 +365,7 @@ BOOL InitDevice()
     pPixelShaderBlob->Release();
     if (FAILED(hr))
     {
+        printf("CreatePixelShader failed\n");
         return hr;
     }
 
@@ -372,6 +396,7 @@ BOOL InitDevice()
     initData.pSysMem = vertices;
     if (FAILED(g_pd3dDevice->CreateBuffer(&bd, &initData, &g_pVertexBuffer)))
     {
+        printf("CreateBuffer failed\n");
         return FALSE;
     }
 

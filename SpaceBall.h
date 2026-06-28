@@ -4,7 +4,7 @@
 
 #pragma once
 
-HRESULT OpenPort();
+HRESULT OpenPort(LPCWSTR port);
 HRESULT ClosePort();
 HRESULT UpdateDeviceState();
 HRESULT SetDeviceSensitivity(uint8_t value);
